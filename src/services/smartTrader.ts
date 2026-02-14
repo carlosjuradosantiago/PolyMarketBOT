@@ -107,7 +107,8 @@ let _cycleRunning = false;
 
 /** Called from App.tsx when config changes */
 export function setMaxExpiry(hours: number) {
-  const h = (hours && !isNaN(hours) && hours > 0) ? hours : 24;
+  const HARD_MAX_HOURS = 168; // 7 days absolute cap — safety net
+  const h = Math.min((hours && !isNaN(hours) && hours > 0) ? hours : 24, HARD_MAX_HOURS);
   _maxExpiryMs = h * 60 * 60 * 1000;
   log(`⏰ Max expiry actualizado: ${h}h (${_maxExpiryMs}ms)`);
 }
@@ -928,6 +929,14 @@ async function _runSmartCycleInner(
       }
 
       // ─── Place Bet ─────────────────────────────
+      // HARD SAFETY: reject if market expires beyond maxExpiry (belt-and-suspenders)
+      const msLeft = endMs - now;
+      if (msLeft > _maxExpiryMs) {
+        rr.decision = `HARD_REJECT — expires in ${(msLeft / 3600000).toFixed(1)}h > max ${(_maxExpiryMs / 3600000).toFixed(0)}h`;
+        debugLog.results.push(rr);
+        log(`     🚫 HARD REJECT: expiry ${(msLeft / 3600000).toFixed(1)}h exceeds max ${(_maxExpiryMs / 3600000).toFixed(0)}h`);
+        continue;
+      }
       const quantity = kelly.betAmount / kelly.price;
       const { order, portfolio: newPortfolio, error } = createPaperOrder(
         market, kelly.outcomeIndex, "buy", quantity, updatedPortfolio,
