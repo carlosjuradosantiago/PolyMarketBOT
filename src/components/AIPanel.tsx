@@ -72,7 +72,7 @@ export default function AIPanel({
       return;
     }
     setExpandedHistoryIdx(idx);
-    // Fetch detail from DB if we don't have it cached and have a DB id
+    // Fetch detail from DB if we don't have it cached and have a DB id 
     if (dbId && !detailCache[dbId]) {
       setLoadingDetail(dbId);
       try {
