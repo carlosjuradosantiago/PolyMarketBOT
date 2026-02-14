@@ -104,8 +104,13 @@ function buildOSINTPrompt(
   const now = new Date();
 
   // Blacklist: markets we already have positions in
-  const blacklist = openOrders.length > 0
-    ? openOrders.map(o => `  - [ID:${o.marketId}] "${o.marketQuestion.slice(0, 100)}" → ${o.outcome} @ ${(o.price * 100).toFixed(0)}¢`).join("\n")
+  // Filter out de-facto resolved orders (100¢) from blacklist — they clutter the prompt
+  const activeOrders = openOrders.filter(o => {
+    const priceCents = Math.round(o.price * 100);
+    return priceCents > 0 && priceCents < 100;
+  });
+  const blacklist = activeOrders.length > 0
+    ? activeOrders.map(o => `  - [ID:${o.marketId}] "${o.marketQuestion.slice(0, 100)}" → ${o.outcome} @ ${(o.price * 100).toFixed(0)}¢`).join("\n")
     : "  (none)";
 
   // Compact market list
@@ -141,7 +146,7 @@ Useful knowledge by category:
   Politics: historical poll trends, legislative calendars, election cycles, incumbency patterns
   Economy: seasonal macro patterns, scheduled data releases, historical indicator ranges
   Weather: climatological averages, seasonal norms, historical temperature distributions
-  Sports: historical team performance, H2H records, league standings patterns (but odds may be stale)
+  Sports: historical team stats, H2H records, league standings — but you have NO current odds, so almost always reject
   Events: scheduled deadlines, regulatory calendars, historical precedents
 → DIVERSIFY recommendations across categories. Don't cluster in a single topic.
 
@@ -177,9 +182,9 @@ See EDGE, FRICTION, and KELLY rules below. If all thresholds met → "recommenda
 ═══ CORE RULES ═══
 
 SIDE-AWARE MATH (critical — prevents phantom edge):
-  If recommendedSide=YES → pMarket = YES_price (from market data), pReal = your YES probability.
-  If recommendedSide=NO  → pMarket = NO_price (from market data, NOT 1-YES — there's spread), pReal = your NO probability.
-  Note: YES_price + NO_price ≠ 1.00 due to spread. Always use the ACTUAL price shown for each side.
+  Always estimate pReal_YES first (your YES probability).
+  If recommendedSide=YES → pMarket = YES_price, pReal = pReal_YES.
+  If recommendedSide=NO  → pMarket = NO_price (from market data, NOT 1-YES — there is spread), pReal = 1 - pReal_YES.
   edge = pReal - pMarket. All values (pReal, pLow, pHigh, edge, evNet) must be on the SAME side.
 
 DYNAMIC FRICTION (by liquidity tier):
@@ -195,10 +200,10 @@ THRESHOLDS TO RECOMMEND:
   Price must be 3¢-97¢ (prefer 15¢-85¢ range). Outside → reject.
 
 SPORTS-SPECIFIC:
-  You likely do NOT have current bookmaker odds (training data is stale for live sports).
-  Use historical team stats, H2H records, league standings, and structural analysis.
-  Require edge ≥ 0.12 for sports (higher bar due to no live odds).
-  If you DO have relevant odds knowledge, normalize with vig removal:
+  You do NOT have current bookmaker odds — reject sports unless you have a clear structural or statistical edge.
+  Require edge ≥ 0.12 AND confidence ≥ 65 for sports.
+  "I think team X is better" without concrete stats = reject.
+  If you DO have specific historical odds or stats, normalize with vig removal:
     pFair = pRaw / (pTeam1 + pTeam2), then edge = pFair - pMarket.
 
 CONFIDENCE RULES (single source of truth):
@@ -217,8 +222,7 @@ QUARTER-KELLY SIZING:
   Recommend ALL that meet criteria. If none qualify → empty arrays.
 
 ═══ OUTPUT FORMAT ═══
-Respond with JSON inside a code fence. Example:
-\`\`\`json
+Respond with ONLY raw JSON (no code fence, no commentary). Example:
 {
   "asOfUtc": "${now.toISOString()}",
   "mode": "SCANNER",
