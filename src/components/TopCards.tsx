@@ -1,6 +1,7 @@
 import { BotStats } from "../types";
 import { formatCurrency, formatPnl, formatPercent } from "../utils/format";
 import { WalletInfo, formatAddress } from "../services/wallet";
+import { useTranslation } from "../i18n";
 
 interface TopCardsProps {
   stats: BotStats;
@@ -8,6 +9,7 @@ interface TopCardsProps {
 }
 
 export default function TopCards({ stats, walletInfo }: TopCardsProps) {
+  const { t } = useTranslation();
   // Equity = cash balance + money invested in open orders
   const equity = stats.current_balance + (stats.invested_in_orders || 0);
   // P&L = realized only (resolved trades). ROI based on realized P&L.
@@ -21,7 +23,7 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
       {/* Polymarket Balance (main real balance) */}
       <div className="bg-bot-card border border-bot-green/30 rounded-lg px-4 py-3">
         <div className="text-xs text-bot-green font-semibold tracking-wider uppercase mb-1">
-          💰 Polymarket
+          {t("card.polymarket")}
         </div>
         <div className="text-2xl font-bold text-bot-green">
           {walletInfo?.polymarketBalance != null
@@ -40,30 +42,30 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
                 </span>
               )}
             </>
-          ) : "No conectada"}
+          ) : t("card.notConnected")}
         </div>
       </div>
 
       {/* Paper Balance (Equity) */}
       <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
         <div className="text-xs text-bot-muted font-semibold tracking-wider uppercase mb-1">
-          📝 Paper Trading
+          {t("card.paperTrading")}
         </div>
         <div className="text-2xl font-bold text-white">
           {formatCurrency(stats.current_balance)}
         </div>
         <div className="text-xs text-bot-muted mt-1">
-          Inicial: {formatCurrency(stats.initial_balance)}
+          {t("card.initial")}: {formatCurrency(stats.initial_balance)}
         </div>
         <div className="text-[10px] text-gray-600 mt-0.5">
-          🔒{formatCurrency(stats.invested_in_orders || 0)} en juego | Equity: {formatCurrency(equity)}
+          🔒{formatCurrency(stats.invested_in_orders || 0)} {t("card.inPlay")} | {t("card.equity")}: {formatCurrency(equity)}
         </div>
       </div>
 
       {/* Total P&L */}
       <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
         <div className="text-xs text-bot-muted font-semibold tracking-wider uppercase mb-1">
-          P&L Total
+          {t("card.pnlTotal")}
         </div>
         <div
           className={`text-2xl font-bold ${
@@ -81,7 +83,7 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
         </div>
         {stats.total_pnl !== 0 && (
           <div className="text-[10px] text-gray-600 mt-0.5">
-            Realizado: {formatPnl(stats.total_pnl)}
+            {t("card.realized")}: {formatPnl(stats.total_pnl)}
           </div>
         )}
       </div>
@@ -89,20 +91,20 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
       {/* Open Orders */}
       <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
         <div className="text-xs text-bot-muted font-semibold tracking-wider uppercase mb-1">
-          Órdenes Abiertas
+          {t("card.openOrders")}
         </div>
         <div className="text-2xl font-bold text-blue-400">
           {stats.open_orders || 0}
         </div>
         <div className="text-xs text-bot-muted mt-1">
-          Valor: ${(stats.pending_value || 0).toFixed(2)}
+          {t("card.value")}: ${(stats.pending_value || 0).toFixed(2)}
         </div>
       </div>
 
       {/* Win Rate */}
       <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
         <div className="text-xs text-bot-muted font-semibold tracking-wider uppercase mb-1">
-          Tasa de Éxito
+          {t("card.winRate")}
         </div>
         <div className="text-2xl font-bold text-white">
           {formatPercent(stats.win_rate)}
@@ -115,7 +117,7 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
       {/* Markets Scanned */}
       <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
         <div className="text-xs text-bot-muted font-semibold tracking-wider uppercase mb-1">
-          Mercados
+          {t("card.markets")}
         </div>
         <div className="text-2xl font-bold text-purple-400">
           {stats.markets_scanned.toLocaleString()}

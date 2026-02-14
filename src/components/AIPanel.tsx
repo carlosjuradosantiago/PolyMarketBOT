@@ -8,10 +8,12 @@
 import { useState, useCallback } from "react";
 import { AICostTracker, KellyResult, Portfolio } from "../types";
 import { formatCost } from "../services/claudeAI";
+import { useTranslation } from "../i18n";
 
 /** Tiny copy-to-clipboard helper with visual feedback */
 function CopyBtn({ text }: { text: string | null | undefined }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useTranslation();
   if (!text) return null;
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -24,14 +26,14 @@ function CopyBtn({ text }: { text: string | null | undefined }) {
   return (
     <button
       onClick={handleCopy}
-      title="Copiar al portapapeles"
+      title={t("ai.copyToClipboard")}
       className={`ml-2 px-1.5 py-0.5 rounded text-[10px] transition-colors ${
         copied
           ? "bg-green-600/30 text-green-400"
           : "bg-gray-700/50 text-gray-400 hover:bg-gray-600/60 hover:text-gray-200"
       }`}
     >
-      {copied ? "✓ Copiado" : "📋 Copiar"}
+      {copied ? t("ai.copied") : t("ai.copy")}
     </button>
   );
 }
@@ -64,6 +66,7 @@ export default function AIPanel({
   const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null);
   const [detailCache, setDetailCache] = useState<Record<number, { prompt: string | null; rawResponse: string | null }>>({}); 
   const [loadingDetail, setLoadingDetail] = useState<number | null>(null);
+  const { t } = useTranslation();
 
   /** Click on history row: toggle expand + fetch detail from DB on demand */
   const handleHistoryClick = useCallback(async (idx: number, dbId?: number) => {
@@ -125,10 +128,10 @@ export default function AIPanel({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              🧠 Kelly Criterion + Claude AI
+              {t("ai.heroTitle")}
             </h2>
             <p className="text-sm text-gray-400 mt-1">
-              Sistema inteligente de apuestas con análisis probabilístico
+              {t("ai.heroSubtitle")}
             </p>
           </div>
           <div className={`px-4 py-2 rounded-lg text-sm font-bold ${
@@ -136,7 +139,7 @@ export default function AIPanel({
               ? "bg-purple-500/20 text-purple-300 border border-purple-500/50" 
               : "bg-gray-700/50 text-gray-500 border border-gray-600/50"
           }`}>
-            {smartMode ? "⚡ ACTIVO" : "💤 INACTIVO"}
+            {smartMode ? t("ai.active") : t("ai.inactive")}
           </div>
         </div>
         
@@ -152,41 +155,41 @@ export default function AIPanel({
       <div className="grid grid-cols-4 gap-3">
         {/* AI Costs Card */}
         <div className="bg-bot-card rounded-xl border border-bot-border p-4">
-          <div className="text-xs text-gray-500 mb-1">💸 Costo IA Total</div>
+          <div className="text-xs text-gray-500 mb-1">{t("ai.totalCost")}</div>
           <div className="text-2xl font-bold text-yellow-400">
             {formatCost(aiCostTracker.totalCostUsd)}
           </div>
           <div className="text-xs text-gray-500 mt-1">
-            {aiCostTracker.totalCalls} llamadas | avg {formatCost(avgCostPerCall)}/call
+            {aiCostTracker.totalCalls} {t("ai.calls")} | {t("ai.avgPerCall")} {formatCost(avgCostPerCall)}{t("ai.perCall")}
           </div>
         </div>
 
         {/* Markets Analyzed */}
         <div className="bg-bot-card rounded-xl border border-bot-border p-4">
-          <div className="text-xs text-gray-500 mb-1">🔍 Mercados</div>
+          <div className="text-xs text-gray-500 mb-1">{t("ai.marketsLabel")}</div>
           <div className="text-2xl font-bold text-blue-400">{marketsAnalyzed}</div>
           <div className="text-xs text-gray-500 mt-1">
-            de {marketsEligible} elegibles (≤{maxExpiryHours}h)
+            {t("ai.ofEligible", String(marketsEligible), String(maxExpiryHours))}
           </div>
         </div>
 
         {/* Bets This Cycle */}
         <div className="bg-bot-card rounded-xl border border-bot-border p-4">
-          <div className="text-xs text-gray-500 mb-1">🎯 Último Ciclo</div>
+          <div className="text-xs text-gray-500 mb-1">{t("ai.lastCycle")}</div>
           <div className="text-2xl font-bold text-green-400">{totalBetsPlaced}</div>
           <div className="text-xs text-gray-500 mt-1">
-            apuestas | {totalSkipped} saltadas
+            {t("ai.bets")} | {totalSkipped} {t("ai.skipped")}
           </div>
         </div>
 
         {/* Next Scan */}
         <div className="bg-bot-card rounded-xl border border-bot-border p-4">
-          <div className="text-xs text-gray-500 mb-1">⏱️ Próximo Escaneo</div>
+          <div className="text-xs text-gray-500 mb-1">{t("ai.nextScan")}</div>
           <div className="text-2xl font-bold text-purple-400">
             {Math.floor(dynamicInterval / 60)}:{String(dynamicInterval % 60).padStart(2, "0")}
           </div>
           <div className="text-xs text-gray-500 mt-1">
-            intervalo dinámico
+            {t("ai.dynamicInterval")}
           </div>
         </div>
       </div>
@@ -196,17 +199,17 @@ export default function AIPanel({
         {/* Kelly Configuration */}
         <div className="bg-bot-card rounded-xl border border-bot-border p-4">
           <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-            ⚙️ Configuración Kelly
+            {t("ai.kellyConfig")}
           </h3>
           <div className="space-y-2 text-sm">
             {[
-              { label: "Kelly Fraction", value: `${KELLY_CONFIG.KELLY_FRACTION * 100}% (Quarter)`, color: "text-purple-400" },
-              { label: "Máx por apuesta", value: `${KELLY_CONFIG.MAX_BET_FRACTION * 100}% bankroll`, color: "text-yellow-400" },
-              { label: "Apuesta mínima", value: `$${Number(KELLY_CONFIG.MIN_BET_USD).toFixed(2)} (mín Polymarket)`, color: "text-blue-400" },
-              { label: "Edge mínimo", value: `${(KELLY_CONFIG.MIN_EDGE_AFTER_COSTS * 100).toFixed(0)}% post-costos`, color: "text-green-400" },
-              { label: "Confianza mín", value: `${KELLY_CONFIG.MIN_CONFIDENCE}/100`, color: "text-orange-400" },
-              { label: "Precio mín", value: `${(KELLY_CONFIG.MIN_MARKET_PRICE * 100).toFixed(0)}¢`, color: "text-cyan-400" },
-              { label: "Precio máx", value: `${(KELLY_CONFIG.MAX_MARKET_PRICE * 100).toFixed(0)}¢`, color: "text-pink-400" },
+              { label: t("ai.kellyFraction"), value: `${KELLY_CONFIG.KELLY_FRACTION * 100}% (${t("ai.quarter")})`, color: "text-purple-400" },
+              { label: t("ai.maxPerBet"), value: `${KELLY_CONFIG.MAX_BET_FRACTION * 100}% ${t("ai.bankroll")}`, color: "text-yellow-400" },
+              { label: t("ai.minBet"), value: `$${Number(KELLY_CONFIG.MIN_BET_USD).toFixed(2)} (${t("ai.minPolymarket")})`, color: "text-blue-400" },
+              { label: t("ai.minEdge"), value: `${(KELLY_CONFIG.MIN_EDGE_AFTER_COSTS * 100).toFixed(0)}% ${t("ai.postCosts")}`, color: "text-green-400" },
+              { label: t("ai.minConfidence"), value: `${KELLY_CONFIG.MIN_CONFIDENCE}/100`, color: "text-orange-400" },
+              { label: t("ai.minPrice"), value: `${(KELLY_CONFIG.MIN_MARKET_PRICE * 100).toFixed(0)}¢`, color: "text-cyan-400" },
+              { label: t("ai.maxPrice"), value: `${(KELLY_CONFIG.MAX_MARKET_PRICE * 100).toFixed(0)}¢`, color: "text-pink-400" },
             ].map(({ label, value, color }) => (
               <div key={label} className="flex justify-between items-center">
                 <span className="text-gray-500 text-xs">{label}</span>
@@ -219,7 +222,7 @@ export default function AIPanel({
         {/* Token Usage */}
         <div className="bg-bot-card rounded-xl border border-bot-border p-4">
           <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-            🪙 Uso de Tokens
+            {t("ai.tokenUsage")}
           </h3>
           <div className="space-y-3">
             {/* Token Bar */}
@@ -250,7 +253,7 @@ export default function AIPanel({
 
             {/* Cost Efficiency */}
             <div className="bg-black/30 rounded-lg p-3 mt-2">
-              <div className="text-xs text-gray-500 mb-1">Costo IA vs Bankroll</div>
+              <div className="text-xs text-gray-500 mb-1">{t("ai.aiCostVsBankroll")}</div>
               <div className="flex items-center gap-2">
                 <div className="flex-1 h-3 bg-gray-800 rounded-full overflow-hidden">
                   <div 
@@ -261,7 +264,7 @@ export default function AIPanel({
                 <span className="text-xs text-yellow-400 font-mono w-16 text-right">
                   {portfolio.balance > 0 
                     ? `${((aiCostTracker.totalCostUsd / portfolio.balance) * 100).toFixed(2)}%`
-                    : "N/A"}
+                    : t("ai.na")}
                 </span>
               </div>
             </div>
@@ -273,20 +276,20 @@ export default function AIPanel({
       {lastKellyResults.length > 0 && (
         <div className="bg-bot-card rounded-xl border border-bot-border p-4">
           <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-            📊 Resultados Kelly — Último Ciclo
+            {t("ai.kellyResults")}
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-gray-500 text-xs border-b border-bot-border">
-                  <th className="text-left py-2 px-2">Outcome</th>
-                  <th className="text-right py-2 px-2">Precio</th>
-                  <th className="text-right py-2 px-2">Edge</th>
-                  <th className="text-right py-2 px-2">Kelly%</th>
-                  <th className="text-right py-2 px-2">Apuesta</th>
-                  <th className="text-right py-2 px-2">EV</th>
-                  <th className="text-right py-2 px-2">Confianza</th>
-                  <th className="text-left py-2 px-2">Razonamiento</th>
+                  <th className="text-left py-2 px-2">{t("ai.outcome")}</th>
+                  <th className="text-right py-2 px-2">{t("ai.price")}</th>
+                  <th className="text-right py-2 px-2">{t("ai.edge")}</th>
+                  <th className="text-right py-2 px-2">{t("ai.kellyPct")}</th>
+                  <th className="text-right py-2 px-2">{t("ai.bet")}</th>
+                  <th className="text-right py-2 px-2">{t("ai.ev")}</th>
+                  <th className="text-right py-2 px-2">{t("ai.confidence")}</th>
+                  <th className="text-left py-2 px-2">{t("ai.reasoning")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -339,9 +342,9 @@ export default function AIPanel({
       {aiCostTracker.history.length > 0 && (
         <div className="bg-bot-card rounded-xl border border-bot-border p-4">
           <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-            📜 Historial de Llamadas AI
+            {t("ai.callHistory")}
             <span className="text-xs text-gray-500 font-normal">
-              (últimas {Math.min(10, aiCostTracker.history.length)})
+              ({t("ai.lastN", String(Math.min(10, aiCostTracker.history.length)))})
             </span>
           </h3>
           <div className="space-y-2">
@@ -373,39 +376,39 @@ export default function AIPanel({
                       {/* Summary line */}
                       {(h.summary || h.recommendations !== undefined) && (
                         <div className="text-xs text-gray-400 flex gap-4">
-                          {h.recommendations !== undefined && <span>📊 {h.recommendations} recomendaciones</span>}
+                          {h.recommendations !== undefined && <span>{t("ai.recommendations", String(h.recommendations))}</span>}
                           {h.summary && <span className="truncate">💡 {h.summary}</span>}
                         </div>
                       )}
 
                       {isLoading ? (
-                        <div className="text-xs text-yellow-400 animate-pulse">⏳ Cargando prompt y respuesta desde la base de datos...</div>
+                        <div className="text-xs text-yellow-400 animate-pulse">{t("ai.loadingPrompt")}</div>
                       ) : (
                         <>
                           {/* Prompt sent */}
                           <div>
-                            <div className="text-xs font-semibold text-cyan-400 mb-1 flex items-center">📤 Prompt enviado<CopyBtn text={detail?.prompt} /></div>
+                            <div className="text-xs font-semibold text-cyan-400 mb-1 flex items-center">{t("ai.promptSent")}<CopyBtn text={detail?.prompt} /></div>
                             {detail?.prompt ? (
                               <pre className="text-[10px] leading-relaxed text-gray-400 bg-black/40 rounded p-2 max-h-60 overflow-y-auto whitespace-pre-wrap break-words font-mono">
                                 {detail.prompt}
                               </pre>
                             ) : (
                               <span className="text-xs text-gray-600 italic">
-                                {detail === undefined ? "Haz click para cargar..." : "No disponible (llamada anterior a la migración)"}
+                                {detail === undefined ? t("ai.clickToLoad") : t("ai.notAvailableLegacy")}
                               </span>
                             )}
                           </div>
 
                           {/* Response received */}
                           <div>
-                            <div className="text-xs font-semibold text-pink-400 mb-1 flex items-center">📥 Respuesta recibida<CopyBtn text={detail?.rawResponse} /></div>
+                            <div className="text-xs font-semibold text-pink-400 mb-1 flex items-center">{t("ai.responseReceived")}<CopyBtn text={detail?.rawResponse} /></div>
                             {detail?.rawResponse ? (
                               <pre className="text-[10px] leading-relaxed text-gray-400 bg-black/40 rounded p-2 max-h-60 overflow-y-auto whitespace-pre-wrap break-words font-mono">
                                 {detail.rawResponse}
                               </pre>
                             ) : (
                               <span className="text-xs text-gray-600 italic">
-                                {detail === undefined ? "Haz click para cargar..." : "No disponible (llamada anterior a la migración)"}
+                                {detail === undefined ? t("ai.clickToLoad") : t("ai.notAvailableLegacy")}
                               </span>
                             )}
                           </div>
@@ -424,9 +427,9 @@ export default function AIPanel({
       {!smartMode && (
         <div className="bg-bot-card rounded-xl border border-bot-border p-8 text-center">
           <div className="text-4xl mb-3">💤</div>
-          <h3 className="text-lg font-semibold text-gray-400">Modo Inteligente Desactivado</h3>
+          <h3 className="text-lg font-semibold text-gray-400">{t("ai.smartModeOff")}</h3>
           <p className="text-sm text-gray-600 mt-2">
-            Activa el modo "🧠 Smart ON" para usar Kelly Criterion + Claude AI
+            {t("ai.enableSmartMode")}
           </p>
         </div>
       )}
@@ -434,9 +437,9 @@ export default function AIPanel({
       {smartMode && lastKellyResults.length === 0 && aiCostTracker.totalCalls === 0 && (
         <div className="bg-bot-card rounded-xl border border-purple-500/20 p-8 text-center">
           <div className="text-4xl mb-3">🧠</div>
-          <h3 className="text-lg font-semibold text-purple-300">Esperando primer ciclo...</h3>
+          <h3 className="text-lg font-semibold text-purple-300">{t("ai.waitingFirstCycle")}</h3>
           <p className="text-sm text-gray-500 mt-2">
-            Inicia el bot para que Claude analice mercados y Kelly calcule apuestas óptimas.
+            {t("ai.startBotPrompt")}
           </p>
         </div>
       )}

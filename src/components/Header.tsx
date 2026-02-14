@@ -1,5 +1,7 @@
 import { Settings, Play, Square, Zap } from "lucide-react";
 import { BotStats } from "../types";
+import { useTranslation } from "../i18n";
+import LanguageSelector from "./LanguageSelector";
 
 interface HeaderProps {
   stats: BotStats;
@@ -26,6 +28,7 @@ export default function Header({
     const s = countdown % 60;
     return `${m}:${String(s).padStart(2, "0")}`;
   };
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-bot-border">
       {/* Left: Title */}
@@ -33,11 +36,11 @@ export default function Header({
         <div className="flex items-center gap-2">
           <Zap className="w-5 h-5 text-bot-cyan" />
           <span className="text-lg font-bold tracking-wider text-white">
-            POLYMARKET AGENT
+            {t("header.title")}
           </span>
           <span className="text-bot-muted mx-1">/</span>
           <span className="text-lg font-bold tracking-wider text-bot-cyan">
-            SURVIVAL MODE
+            {t("header.mode")}
           </span>
         </div>
 
@@ -55,13 +58,13 @@ export default function Header({
               isRunning ? "text-bot-green" : "text-bot-red"
             }`}
           >
-            {isRunning ? "Alive" : "Stopped"}
+            {isRunning ? t("header.alive") : t("header.stopped")}
           </span>
         </div>
 
         {isDemoMode && (
           <span className="text-xs bg-bot-purple/20 text-bot-purple px-2 py-0.5 rounded ml-2">
-            DEMO
+            {t("header.demo")}
           </span>
         )}
       </div>
@@ -70,18 +73,20 @@ export default function Header({
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-3 text-sm text-bot-muted">
           <span>
-            Uptime{" "}
+            {t("header.uptime")}{" "}
             <span className="text-white font-medium">{stats.uptime}</span>
           </span>
           <span>
-            Cycle{" "}
+            {t("header.cycle")}{" "}
             <span className="text-white font-medium">#{stats.cycle}</span>
           </span>
           <span>
-            Next{" "}
+            {t("header.next")}{" "}
             <span className={`font-mono font-bold ${countdown <= 60 ? "text-yellow-400" : "text-bot-cyan"}`}>{fmtCountdown()}</span>
           </span>
         </div>
+
+        <LanguageSelector />
 
         <div className="flex items-center gap-2">
           {isRunning ? (
@@ -90,7 +95,7 @@ export default function Header({
               className="flex items-center gap-1.5 bg-bot-red/20 text-bot-red px-4 py-1.5 rounded text-sm font-semibold hover:bg-bot-red/30 transition-colors"
             >
               <Square className="w-3.5 h-3.5" />
-              STOP
+              {t("header.stop")}
             </button>
           ) : (
             <button
@@ -98,7 +103,7 @@ export default function Header({
               className="flex items-center gap-1.5 bg-bot-green/20 text-bot-green px-4 py-1.5 rounded text-sm font-semibold hover:bg-bot-green/30 transition-colors"
             >
               <Play className="w-3.5 h-3.5" />
-              START
+              {t("header.start")}
             </button>
           )}
 

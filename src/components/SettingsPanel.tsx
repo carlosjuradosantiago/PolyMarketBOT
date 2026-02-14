@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X, Key, Bot, Sliders, Shield, Save, Eye, EyeOff } from "lucide-react";
 import { BotConfig, defaultConfig } from "../types";
 import { CLAUDE_MODELS } from "../services/claudeAI";
+import { useTranslation } from "../i18n";
 
 interface SettingsPanelProps {
   config: BotConfig;
@@ -17,6 +18,7 @@ export default function SettingsPanel({
   const [form, setForm] = useState<BotConfig>({ ...config });
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<"keys" | "trading" | "ai">("keys");
+  const { t } = useTranslation();
 
   const toggleShow = (field: string) => {
     setShowKeys((prev) => ({ ...prev, [field]: !prev[field] }));
@@ -31,9 +33,9 @@ export default function SettingsPanel({
   };
 
   const tabs = [
-    { id: "keys" as const, label: "API Keys", icon: Key },
-    { id: "trading" as const, label: "Trading", icon: Sliders },
-    { id: "ai" as const, label: "AI Config", icon: Bot },
+    { id: "keys" as const, label: t("settings.tabKeys"), icon: Key },
+    { id: "trading" as const, label: t("settings.tabTrading"), icon: Sliders },
+    { id: "ai" as const, label: t("settings.tabAI"), icon: Bot },
   ];
 
   return (
@@ -44,7 +46,7 @@ export default function SettingsPanel({
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-bot-cyan" />
             <span className="text-lg font-bold text-white tracking-wide">
-              Configuration
+              {t("settings.title")}
             </span>
           </div>
           <button
@@ -78,46 +80,46 @@ export default function SettingsPanel({
           {activeTab === "keys" && (
             <>
               <SectionTitle
-                title="Polymarket CLOB API"
-                subtitle="Get your keys from polymarket.com/settings"
+                title={t("settings.polymarketCLOB")}
+                subtitle={t("settings.polymarketSubtitle")}
               />
               <SecretInput
-                label="API Key"
+                label={t("settings.apiKey")}
                 value={form.polymarket_api_key}
                 onChange={(v) => updateField("polymarket_api_key", v)}
                 show={showKeys["poly_key"]}
                 onToggle={() => toggleShow("poly_key")}
-                placeholder="Enter your Polymarket API key..."
+                placeholder={t("settings.apiKeyPlaceholder")}
               />
               <SecretInput
-                label="API Secret"
+                label={t("settings.apiSecret")}
                 value={form.polymarket_secret}
                 onChange={(v) => updateField("polymarket_secret", v)}
                 show={showKeys["poly_secret"]}
                 onToggle={() => toggleShow("poly_secret")}
-                placeholder="Enter your API secret..."
+                placeholder={t("settings.apiSecretPlaceholder")}
               />
               <SecretInput
-                label="Passphrase"
+                label={t("settings.passphrase")}
                 value={form.polymarket_passphrase}
                 onChange={(v) => updateField("polymarket_passphrase", v)}
                 show={showKeys["poly_pass"]}
                 onToggle={() => toggleShow("poly_pass")}
-                placeholder="Enter your passphrase..."
+                placeholder={t("settings.passphrasePlaceholder")}
               />
 
               <div className="border-t border-bot-border pt-5">
                 <SectionTitle
-                  title="Claude AI API"
-                  subtitle="Get your key from console.anthropic.com"
+                  title={t("settings.claudeAI")}
+                  subtitle={t("settings.claudeSubtitle")}
                 />
                 <SecretInput
-                  label="Claude API Key"
+                  label={t("settings.claudeApiKey")}
                   value={form.claude_api_key}
                   onChange={(v) => updateField("claude_api_key", v)}
                   show={showKeys["claude_key"]}
                   onToggle={() => toggleShow("claude_key")}
-                  placeholder="sk-ant-api03-..."
+                  placeholder={t("settings.claudeApiKeyPlaceholder")}
                 />
               </div>
             </>
@@ -126,11 +128,11 @@ export default function SettingsPanel({
           {activeTab === "trading" && (
             <>
               <SectionTitle
-                title="Trading Parameters"
-                subtitle="Configure risk management and execution"
+                title={t("settings.tradingParams")}
+                subtitle={t("settings.tradingSubtitle")}
               />
               <NumberInput
-                label="Banca Inicial ($)"
+                label={t("settings.initialBalance")}
                 value={form.initial_balance}
                 onChange={(v) => updateField("initial_balance", v)}
                 min={1}
@@ -138,7 +140,7 @@ export default function SettingsPanel({
                 step={10}
               />
               <NumberInput
-                label="Max Bet Size ($)"
+                label={t("settings.maxBetSize")}
                 value={form.max_bet_size}
                 onChange={(v) => updateField("max_bet_size", v)}
                 min={1}
@@ -146,7 +148,7 @@ export default function SettingsPanel({
                 step={10}
               />
               <NumberInput
-                label="Min Edge Threshold"
+                label={t("settings.minEdge")}
                 value={form.min_edge_threshold}
                 onChange={(v) => updateField("min_edge_threshold", v)}
                 min={0.01}
@@ -154,7 +156,7 @@ export default function SettingsPanel({
                 step={0.01}
               />
               <NumberInput
-                label="Max Concurrent Orders"
+                label={t("settings.maxConcurrent")}
                 value={form.max_concurrent_orders}
                 onChange={(v) => updateField("max_concurrent_orders", v)}
                 min={1}
@@ -162,7 +164,7 @@ export default function SettingsPanel({
                 step={1}
               />
               <NumberInput
-                label="Scan Interval (seconds)"
+                label={t("settings.scanInterval")}
                 value={form.scan_interval_secs}
                 onChange={(v) => updateField("scan_interval_secs", v)}
                 min={5}
@@ -174,7 +176,7 @@ export default function SettingsPanel({
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-xs text-bot-muted uppercase tracking-wider">
-                    Ventana de Búsqueda (horas)
+                    {t("settings.searchWindow")}
                   </label>
                   <span className="text-xs text-bot-cyan font-mono">
                     {form.max_expiry_hours}h{form.max_expiry_hours >= 24 ? ` (${(form.max_expiry_hours / 24).toFixed(form.max_expiry_hours % 24 === 0 ? 0 : 1)} días)` : ""}
@@ -202,7 +204,7 @@ export default function SettingsPanel({
                 <div>
                   <div className="text-sm text-white">Auto Trading</div>
                   <div className="text-xs text-bot-muted">
-                    Automatically place orders when edge is found
+                    {t("settings.autoTradingDesc")}
                   </div>
                 </div>
                 <Toggle
@@ -215,7 +217,7 @@ export default function SettingsPanel({
                 <div>
                   <div className="text-sm text-white">Survival Mode</div>
                   <div className="text-xs text-bot-muted">
-                    Conservative sizing to maximize runway
+                    {t("settings.survivalModeDesc")}
                   </div>
                 </div>
                 <Toggle
@@ -227,14 +229,14 @@ export default function SettingsPanel({
               <div className="flex items-center justify-between border-t border-bot-border pt-4 mt-4">
                 <div>
                   <div className="text-sm text-white flex items-center gap-2">
-                    <span className="text-yellow-400">⚠️</span> Paper Trading
+                    <span className="text-yellow-400">⚠️</span> {t("settings.paperTrading")}
                   </div>
                   <div className="text-xs text-bot-muted">
-                    Simulate trades without real money (always enabled)
+                    {t("settings.paperTradingDesc")}
                   </div>
                 </div>
                 <div className="px-3 py-1 bg-green-500/20 text-green-400 rounded text-xs font-bold">
-                  ACTIVO
+                  {t("settings.paperActive")}
                 </div>
               </div>
             </>
@@ -243,12 +245,12 @@ export default function SettingsPanel({
           {activeTab === "ai" && (
             <>
               <SectionTitle
-                title="AI Configuration"
-                subtitle="Configure Claude AI model and behavior"
+                title={t("settings.aiConfig")}
+                subtitle={t("settings.aiConfigSubtitle")}
               />
               <div className="space-y-2">
                 <label className="text-xs text-bot-muted uppercase tracking-wider">
-                  Claude Model
+                  {t("settings.claudeModel")}
                 </label>
                 <div className="space-y-2">
                   {CLAUDE_MODELS.map((m) => {
@@ -280,13 +282,13 @@ export default function SettingsPanel({
                         </div>
                         <div className="flex items-center gap-4 mt-1 ml-5">
                           <span className="text-[11px] text-gray-500">
-                            Input: <span className="text-yellow-400/80 font-mono">${m.inputPrice}/M</span>
+                            {t("settings.input")} <span className="text-yellow-400/80 font-mono">${m.inputPrice}/M</span>
                           </span>
                           <span className="text-[11px] text-gray-500">
-                            Output: <span className="text-yellow-400/80 font-mono">${m.outputPrice}/M</span>
+                            {t("settings.output")} <span className="text-yellow-400/80 font-mono">${m.outputPrice}/M</span>
                           </span>
                           <span className="text-[11px] text-gray-500">
-                            ~<span className="text-green-400/80 font-mono">${((m.inputPrice * 1500 + m.outputPrice * 800) / 1_000_000).toFixed(4)}</span>/ciclo
+                            ~<span className="text-green-400/80 font-mono">${((m.inputPrice * 1500 + m.outputPrice * 800) / 1_000_000).toFixed(4)}</span>{t("settings.perCycle")}
                           </span>
                         </div>
                       </button>
@@ -304,14 +306,14 @@ export default function SettingsPanel({
             onClick={onClose}
             className="px-4 py-2 text-sm text-bot-muted hover:text-white transition-colors"
           >
-            Cancel
+            {t("settings.cancel")}
           </button>
           <button
             onClick={handleSave}
             className="flex items-center gap-2 bg-bot-cyan/20 text-bot-cyan px-5 py-2 rounded-lg text-sm font-semibold hover:bg-bot-cyan/30 transition-colors"
           >
             <Save className="w-4 h-4" />
-            Save Configuration
+            {t("settings.save")}
           </button>
         </div>
       </div>

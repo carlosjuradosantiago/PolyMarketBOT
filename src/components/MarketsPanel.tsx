@@ -17,6 +17,7 @@ import {
   formatTimeRemaining,
 } from "../services/polymarket";
 import { createPaperOrder } from "../services/paperTrading";
+import { useTranslation } from "../i18n";
 
 interface MarketsProps {
   portfolio: Portfolio;
@@ -24,28 +25,21 @@ interface MarketsProps {
   onActivity: (message: string, type: string) => void;
 }
 
-const timeframeOptions: { value: TimeframeFilter; label: string }[] = [
-  { value: "1h", label: "1 hora" },
-  { value: "4h", label: "4 horas" },
-  { value: "8h", label: "8 horas" },
-  { value: "1d", label: "1 día" },
-  { value: "3d", label: "3 días" },
-  { value: "7d", label: "7 días" },
-  { value: "all", label: "Todos" },
-];
+const timeframeValues: TimeframeFilter[] = ["1h", "4h", "8h", "1d", "3d", "7d", "all"];
 
-const categoryOptions: { value: CategoryFilter; label: string; icon: string }[] = [
-  { value: "all", label: "Todos", icon: "🌐" },
-  { value: "politics", label: "Política", icon: "🏛️" },
-  { value: "sports", label: "Deportes", icon: "⚽" },
-  { value: "crypto", label: "Crypto", icon: "₿" },
-  { value: "entertainment", label: "Entretenimiento", icon: "🎬" },
-  { value: "science", label: "Ciencia", icon: "🔬" },
-  { value: "business", label: "Negocios", icon: "📈" },
-  { value: "other", label: "Otros", icon: "📦" },
+const categoryValues: { value: CategoryFilter; icon: string }[] = [
+  { value: "all", icon: "🌐" },
+  { value: "politics", icon: "🏛️" },
+  { value: "sports", icon: "⚽" },
+  { value: "crypto", icon: "₿" },
+  { value: "entertainment", icon: "🎬" },
+  { value: "science", icon: "🔬" },
+  { value: "business", icon: "📈" },
+  { value: "other", icon: "📦" },
 ];
 
 export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity }: MarketsProps) {
+  const { t } = useTranslation();
   const [markets, setMarkets] = useState<PolymarketMarket[]>([]);
   const [filters, setFilters] = useState<MarketFilters>(defaultFilters);
   const [loading, setLoading] = useState(true);
@@ -67,19 +61,19 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
   const loadMarkets = async () => {
     try {
       setLoading(true);
-      setLoadProgress("Iniciando...");
-      onActivity("Cargando todos los mercados de Polymarket...", "System");
+      setLoadProgress(t("markets.starting"));
+      onActivity(t("markets.loadingAll"), "System");
       const data = await fetchAllMarkets(true, 12000, (loaded: number) => {
-        setLoadProgress(`${loaded.toLocaleString()} mercados...`);
+        setLoadProgress(`${loaded.toLocaleString()} ${t("markets.marketsCount")}...`);
       });
       setMarkets(data);
       setDisplayCount(100); // Reset display on new load
       setError(null);
       setLoadProgress("");
-      onActivity(`${data.length.toLocaleString()} mercados activos encontrados`, data.length > 0 ? "Info" : "Warning");
+      onActivity(`${data.length.toLocaleString()} ${t("markets.found")}`, data.length > 0 ? "Info" : "Warning");
     } catch (e) {
-      setError("Error cargando mercados");
-      onActivity(`Error: ${e instanceof Error ? e.message : "Error desconocido"}`, "Error");
+      setError(t("markets.errorLoading"));
+      onActivity(`Error: ${e instanceof Error ? e.message : t("markets.unknownError")}`, "Error");
       console.error(e);
     } finally {
       setLoading(false);
@@ -109,7 +103,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
 
     const amount = parseFloat(betAmount);
     if (isNaN(amount) || amount <= 0) {
-      onActivity("Cantidad inválida", "Warning");
+      onActivity(t("markets.invalidAmount"), "Warning");
       return;
     }
 
@@ -146,9 +140,9 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
       <div className="p-4 border-b border-bot-border bg-gradient-to-r from-bot-green/10 to-transparent">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <span className="text-bot-green">📊</span> Mercados en Vivo
+            <span className="text-bot-green">📊</span> {t("markets.title")}
             <span className="text-xs text-gray-500 font-normal">
-              ({filteredMarkets.length.toLocaleString()} mercados{markets.length !== filteredMarkets.length ? ` de ${markets.length.toLocaleString()}` : ""})
+              ({filteredMarkets.length.toLocaleString()} {t("markets.marketsCount")}{markets.length !== filteredMarkets.length ? ` ${t("markets.of")} ${markets.length.toLocaleString()}` : ""})
             </span>
           </h2>
           <div className="flex items-center gap-3">
@@ -163,7 +157,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
               className="px-3 py-1 text-xs bg-bot-green/20 text-bot-green rounded-lg 
                        hover:bg-bot-green/30 transition-colors disabled:opacity-50"
             >
-              {loading ? "Cargando..." : "🔄 Actualizar"}
+              {loading ? t("markets.loading") : t("markets.refresh")}
             </button>
           </div>
         </div>
@@ -172,7 +166,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           {/* Timeframe */}
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Vencimiento</label>
+            <label className="block text-xs text-gray-500 mb-1">{t("markets.expiry")}</label>
             <select
               value={filters.timeframe}
               onChange={(e) =>
@@ -181,9 +175,9 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
               className="w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
                        text-sm text-white focus:border-bot-green outline-none"
             >
-              {timeframeOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
+              {timeframeValues.map((val) => (
+                <option key={val} value={val}>
+                  {t(`markets.tf.${val}` as any)}
                 </option>
               ))}
             </select>
@@ -191,7 +185,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
 
           {/* Category */}
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Categoría</label>
+            <label className="block text-xs text-gray-500 mb-1">{t("markets.category")}</label>
             <select
               value={filters.category}
               onChange={(e) =>
@@ -200,9 +194,9 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
               className="w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
                        text-sm text-white focus:border-bot-green outline-none"
             >
-              {categoryOptions.map((opt) => (
+              {categoryValues.map((opt) => (
                 <option key={opt.value} value={opt.value}>
-                  {opt.icon} {opt.label}
+                  {opt.icon} {t(`markets.cat.${opt.value}` as any)}
                 </option>
               ))}
             </select>
@@ -210,7 +204,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
 
           {/* Min Volume */}
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Vol. Mínimo</label>
+            <label className="block text-xs text-gray-500 mb-1">{t("markets.minVolume")}</label>
             <select
               value={filters.minVolume}
               onChange={(e) =>
@@ -219,7 +213,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
               className="w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
                        text-sm text-white focus:border-bot-green outline-none"
             >
-              <option value={0}>Sin mínimo</option>
+              <option value={0}>{t("markets.vol.none")}</option>
               <option value={1000}>$1K+</option>
               <option value={5000}>$5K+</option>
               <option value={10000}>$10K+</option>
@@ -230,12 +224,12 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
 
           {/* Search */}
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Buscar</label>
+            <label className="block text-xs text-gray-500 mb-1">{t("markets.search")}</label>
             <input
               type="text"
               value={filters.searchQuery}
               onChange={(e) => setFilters({ ...filters, searchQuery: e.target.value })}
-              placeholder="Buscar mercado..."
+              placeholder={t("markets.searchPlaceholder")}
               className="w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
                        text-sm text-white placeholder-gray-600 focus:border-bot-green outline-none"
             />
@@ -254,7 +248,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
         {!error && filteredMarkets.length === 0 && !loading && (
           <div className="p-8 text-center text-gray-500">
             <div className="text-4xl mb-2">🔍</div>
-            No se encontraron mercados con estos filtros
+            {t("markets.noResults")}
           </div>
         )}
 
@@ -285,8 +279,8 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
                     {formatVolume(market.liquidity)}
                   </span>
                   <span className="px-2 py-0.5 bg-bot-border rounded text-gray-400">
-                    {categoryOptions.find((c) => c.value === market.category)?.icon}{" "}
-                    {categoryOptions.find((c) => c.value === market.category)?.label}
+                    {categoryValues.find((c) => c.value === market.category)?.icon}{" "}
+                    {t(`markets.cat.${market.category}` as any)}
                   </span>
                 </div>
               </div>
@@ -320,7 +314,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
                 <div className="flex flex-wrap items-end gap-4">
                   {/* Outcome Selection */}
                   <div className="flex-1 min-w-[200px]">
-                    <label className="block text-xs text-gray-500 mb-2">Selecciona resultado</label>
+                    <label className="block text-xs text-gray-500 mb-2">{t("markets.selectOutcome")}</label>
                     <div className="flex gap-2">
                       {market.outcomes.map((outcome, idx) => {
                         const price = parseFloat(market.outcomePrices[idx]);
@@ -347,7 +341,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
 
                   {/* Amount Input */}
                   <div className="w-[120px]">
-                    <label className="block text-xs text-gray-500 mb-2">Cantidad ($)</label>
+                    <label className="block text-xs text-gray-500 mb-2">{t("markets.amount")}</label>
                     <input
                       type="number"
                       value={betAmount}
@@ -362,7 +356,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
 
                   {/* Potential Payout */}
                   <div className="w-[140px]">
-                    <label className="block text-xs text-gray-500 mb-2">Pago potencial</label>
+                    <label className="block text-xs text-gray-500 mb-2">{t("markets.potentialPayout")}</label>
                     <div className="bg-bot-bg border border-green-500/30 rounded-lg px-3 py-2 text-green-400 font-bold">
                       ${(parseFloat(betAmount || "0") / parseFloat(market.outcomePrices[betOutcome])).toFixed(2)}
                     </div>
@@ -379,14 +373,14 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
                              hover:bg-bot-green/80 transition-colors disabled:opacity-50 
                              disabled:cursor-not-allowed"
                   >
-                    💰 Apostar
+                    {t("markets.placeBet")}
                   </button>
                 </div>
 
                 {/* Balance Warning */}
                 {portfolio.balance < parseFloat(betAmount || "0") && (
                   <div className="mt-2 text-xs text-red-400">
-                    ⚠️ Balance insuficiente. Tienes ${portfolio.balance.toFixed(2)}
+                    {t("markets.insufficientBalance", portfolio.balance.toFixed(2))}
                   </div>
                 )}
               </div>
@@ -401,7 +395,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
               className="px-6 py-2.5 text-sm font-medium bg-bot-green/15 text-bot-green rounded-lg 
                        border border-bot-green/25 hover:bg-bot-green/25 transition-all"
             >
-              Cargar más ({(filteredMarkets.length - displayCount).toLocaleString()} restantes)
+              {t("markets.loadMore", (filteredMarkets.length - displayCount).toLocaleString())}
             </button>
           </div>
         )}
@@ -409,7 +403,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
         {/* Showing count */}
         {filteredMarkets.length > 100 && (
           <div className="px-4 py-2 text-center text-[10px] text-gray-600 border-t border-bot-border">
-            Mostrando {Math.min(displayCount, filteredMarkets.length).toLocaleString()} de {filteredMarkets.length.toLocaleString()} mercados
+            {t("markets.showing", Math.min(displayCount, filteredMarkets.length).toLocaleString(), filteredMarkets.length.toLocaleString())}
           </div>
         )}      </div>
     </div>

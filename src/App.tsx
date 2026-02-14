@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "./i18n";
 import Header from "./components/Header";
 import TopCards from "./components/TopCards";
 import BalanceChart from "./components/BalanceChart";
@@ -50,6 +51,7 @@ if (localStorage.getItem("clob_creds_version") !== CREDS_VERSION) {
 type ViewMode = "dashboard" | "markets" | "orders" | "ai" | "console";
 
 function App() {
+  const { t } = useTranslation();
   // Core state
   const [portfolio, setPortfolio] = useState<Portfolio>(defaultPortfolio);
   const [stats, setStats] = useState<BotStats>(defaultStats);
@@ -228,8 +230,8 @@ function App() {
         const hasOpen = currentPortfolio.openOrders.length;
         addActivity(
           hasOpen > 0
-            ? `💤 ${status} — Solo resolviendo ${hasOpen} apuesta(s) pendiente(s). Sin escaneo de mercados ni IA.`
-            : `💤 ${status} — Sin apuestas pendientes ni saldo para operar.`,
+            ? t("app.sleepWithOrders", status, String(hasOpen))
+            : t("app.sleepNoOrders", status),
           "Warning"
         );
         setIsAnalyzing(false);
@@ -241,17 +243,17 @@ function App() {
       }
 
       // Fetch fresh market data (only if we have balance to trade)
-      addActivity(`Escaneando mercados de Polymarket...`, "Info");
+      addActivity(t("app.scanning"), "Info");
       const freshMarkets = await fetchAllMarkets(true, 12000, (loaded: number) => {
         // Update UI as pages load
         setMarkets(prev => prev.length < loaded ? Array(loaded).fill(null) as any : prev);
       });
       setMarkets(freshMarkets);
       setStats(prev => ({ ...prev, markets_scanned: prev.markets_scanned + freshMarkets.length }));
-      addActivity(`${freshMarkets.length} mercados activos encontrados`, "Info");
+      addActivity(t("app.marketsFound", String(freshMarkets.length)), "Info");
 
       // ── OSINT Research + Kelly Trading ──
-      addActivity("🔬 Iniciando Deep Research OSINT...", "Inference");
+      addActivity(t("app.startingResearch"), "Inference");
       setIsAnalyzing(true);
 
       const smartResult = await runSmartCycle(currentPortfolio, freshMarkets, config.claude_model);
@@ -290,7 +292,7 @@ function App() {
       
     } catch (e) {
       console.error("Trading cycle error:", e);
-      addActivity(`Error en ciclo: ${e}`, "Error");
+      addActivity(t("app.cycleError", String(e)), "Error");
       setIsAnalyzing(false);
     }
   }, [portfolio, startTime, addActivity, updateStatsFromPortfolio]);
@@ -310,8 +312,8 @@ function App() {
     // Persist to DB
     dbSetBotState({ isRunning: true, startTime: now.toISOString() })
       .catch(e => console.error("[App] DB bot state save failed:", e));
-    addActivity("🚀 Bot iniciado — Kelly Criterion + Claude AI", "Info");
-    dbAddActivity({ timestamp: new Date().toISOString(), message: "🚀 Bot iniciado — Kelly Criterion + Claude AI", entry_type: "Info" })
+    addActivity(t("app.botStarted"), "Info");
+    dbAddActivity({ timestamp: new Date().toISOString(), message: t("app.botStarted"), entry_type: "Info" })
       .catch(e => console.error("[App] DB activity save failed:", e));
   }, [addActivity]);
 
@@ -325,8 +327,8 @@ function App() {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-    addActivity("⏹️ Bot detenido", "Warning");
-    dbAddActivity({ timestamp: new Date().toISOString(), message: "⏹️ Bot detenido", entry_type: "Warning" })
+    addActivity(t("app.botStopped"), "Warning");
+    dbAddActivity({ timestamp: new Date().toISOString(), message: t("app.botStopped"), entry_type: "Warning" })
       .catch(e => console.error("[App] DB activity save failed:", e));
   }, [addActivity]);
 
@@ -345,7 +347,7 @@ function App() {
     setBankrollStatus("");
     setMarketsEligible(0);
     setMarketsAnalyzed(0);
-    addActivity(`🔄 Portfolio reseteado - $${bal.toFixed(2)} | IA costos limpiados`, "Info");
+    addActivity(t("app.portfolioReset", bal.toFixed(2)), "Info");
   }, [addActivity, updateStatsFromPortfolio, config.initial_balance]);
 
   // Keep refs always pointing to latest values
@@ -435,13 +437,13 @@ function App() {
         const freshPortfolio = await loadPortfolioFromDB();
         setPortfolio(freshPortfolio);
         updateStatsFromPortfolio(freshPortfolio);
-        addActivity(`💰 Banca inicial actualizada: $${newBal.toFixed(2)} (reset completo)`, "Info");
+        addActivity(t("app.balanceUpdated", newBal.toFixed(2)), "Info");
       } catch (e) {
         console.error("[App] Failed to update initial balance:", e);
       }
     }
 
-    addActivity(`⚙️ Configuración actualizada (expiry: ${newConfig.max_expiry_hours}h)`, "Info");
+    addActivity(t("app.configUpdated", String(newConfig.max_expiry_hours)), "Info");
   }, [config, addActivity, updateStatsFromPortfolio]);
 
   return (
@@ -461,11 +463,11 @@ function App() {
       <div className="px-4 pt-2">
         <div className="flex gap-2 bg-bot-card rounded-lg p-1 border border-bot-border w-fit">
           {[
-            { id: "dashboard", label: "📊 Dashboard", icon: "" },
-            { id: "markets", label: "🏪 Mercados", icon: "" },
-            { id: "orders", label: "📋 Órdenes", icon: "" },
-            { id: "ai", label: "🤖 AI Kelly", icon: "" },
-            { id: "console", label: isAnalyzing ? "🔬 Analizando..." : `🖥️ Consola ${countdown > 0 ? `(${Math.floor(countdown/60)}:${String(countdown%60).padStart(2,'0')})` : ""}`, icon: "" },
+            { id: "dashboard", label: t("tab.dashboard"), icon: "" },
+            { id: "markets", label: t("tab.markets"), icon: "" },
+            { id: "orders", label: t("tab.orders"), icon: "" },
+            { id: "ai", label: t("tab.ai"), icon: "" },
+            { id: "console", label: isAnalyzing ? t("tab.analyzing") : `${t("tab.console")} ${countdown > 0 ? `(${Math.floor(countdown/60)}:${String(countdown%60).padStart(2,'0')})` : ""}`, icon: "" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -486,7 +488,7 @@ function App() {
             className="px-4 py-2 rounded-md text-sm font-medium text-red-400 
                      hover:text-red-300 hover:bg-red-500/10 transition-all ml-2"
           >
-            🔄 Reset
+            {t("tab.reset")}
           </button>
         </div>
       </div>
