@@ -137,17 +137,20 @@ Detect when public information (polls, weather data, indicators, odds, official 
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | RISK: medium-low (preserve capital > maximize return)
 ${historyLine}
 
-═══ YOUR KNOWLEDGE (no live web access) ═══
-You have NO internet access. Use ONLY what you know from training data (cutoff ~early 2025).
-For events AFTER your cutoff, you must rely on: scheduled dates, historical patterns, seasonal averages, and structural analysis.
-Do NOT pretend to have live data you don't have. If a market depends on data you can't know → low confidence.
+═══ WEB ACCESS (MANDATORY — USE IT) ═══
+You HAVE internet access via the web_search tool. You MUST use it before making any recommendation.
+Search for current, real-time information. The more pages you consult, the better your analysis.
+Every recommendation MUST include ≥2 sources with date (YYYY-MM-DD) and working URL.
 
-Useful knowledge by category:
-  Politics: historical poll trends, legislative calendars, election cycles, incumbency patterns
-  Economy: seasonal macro patterns, scheduled data releases, historical indicator ranges
-  Weather: climatological averages, seasonal norms, historical temperature distributions
-  Sports: historical team stats, H2H records, league standings — but you have NO current odds, so almost always reject
-  Events: scheduled deadlines, regulatory calendars, historical precedents
+MANDATORY searches by category:
+  Sports/Esports: MUST search for current bookmaker odds (Pinnacle, Betfair, DraftKings, etc.).
+    → If no current odds found → REJECT. No exceptions.
+  Weather: MUST search for current forecast model/official forecast (NWS, NOAA, Met Office, AccuWeather, etc.).
+    → If no current forecast found → REJECT. No exceptions.
+  Politics/Economy: Search latest polls, official data releases, breaking news from last 7 days.
+  All markets: If you cannot verify resolution rules from the market page or official source → REJECT.
+
+Live web data is your PRIMARY source. Training data (cutoff ~early 2025) is supplementary.
 → DIVERSIFY recommendations across categories. Don't cluster in a single topic.
 
 ═══ BLACKLIST (FORBIDDEN — already have position) ═══
@@ -169,7 +172,7 @@ For EACH market assign:
 ─── STEP 2: RESEARCH (top 3-5 candidates, using prelimSide from Step 1) ───
 For each candidate:
   1. Verify resolution rules (official source, definition, timezone). Can't verify → confidence ≤ 40, don't recommend.
-  2. Find ≥2 concrete dated data points from your training knowledge. Cite with dates (YYYY-MM-DD).
+  2. Search for ≥2 concrete dated data points via web_search. Cite with date (YYYY-MM-DD) and real URL.
   3. Detect clusterId (mutually exclusive markets). Max 1 recommendation per cluster.
      Example: markets [3] "Real Madrid vs Sociedad — Madrid win" and [7] "Real Madrid vs Sociedad — draw"
      → same match → clusterId: "rm-rso-20260214". Pick only the best edge.
@@ -195,21 +198,32 @@ DYNAMIC FRICTION (by liquidity tier):
   friction = spread + fee + slippage + near_expiry_penalty
   evNet = edge - friction (must be > 0)
 
+  ── WEATHER EXCEPTION (patient limit orders) ──
+  Weather markets with horizon > 12h AND Liq ≥ $100:
+    spread_est = 1.5%, slippage = 0.5% → friction = 1.5% + 0.5% + 0.5% = 2.5%
+    Rationale: patient limit orders in thin weather markets fill at better prices over 12h+.
+    Use orderType: "LIMIT" and note patience strategy in executionNotes.
+
 THRESHOLDS TO RECOMMEND:
   edge ≥ 0.08 AND confidence ≥ 60 AND evNet > 0
   Price must be 3¢-97¢ (prefer 15¢-85¢ range). Outside → reject.
 
 SPORTS-SPECIFIC:
-  You do NOT have current bookmaker odds — reject sports unless you have a clear structural or statistical edge.
+  You MUST search for current bookmaker odds (Pinnacle, Betfair, DraftKings) via web_search.
+  No current odds found → REJECT. "I think team X is better" without live odds = REJECT.
   Require edge ≥ 0.12 AND confidence ≥ 65 for sports.
-  "I think team X is better" without concrete stats = reject.
-  If you DO have specific historical odds or stats, normalize with vig removal:
+  Normalize bookmaker odds with vig removal:
     pFair = pRaw / (pTeam1 + pTeam2), then edge = pFair - pMarket.
 
+WEATHER-SPECIFIC:
+  You MUST search for current forecast (NWS, NOAA, Met Office, AccuWeather) via web_search.
+  No current forecast found → REJECT.
+  Weather has HIGH edge potential — use reduced friction tier for patient limit orders (see WEATHER EXCEPTION above).
+
 CONFIDENCE RULES (single source of truth):
-  < 2 dated sources → confidence ≤ 40, don't recommend.
+  < 2 sources with date + URL → confidence ≤ 40, don't recommend.
   Can't verify resolution rules → confidence ≤ 40, don't recommend.
-  NEVER fabricate sources or data. Honest low confidence > fabricated high confidence.
+  NEVER fabricate sources, URLs, or data. Every source MUST be a real URL found via web_search.
 
 QUARTER-KELLY SIZING:
   kellyFraction = (pReal × b - q) / b   where b = (1/price - 1), q = 1 - pReal
@@ -261,7 +275,7 @@ Respond with ONLY raw JSON (no code fence, no commentary). Example:
       "sizeUsd": 0.00,
       "orderType": "LIMIT",
       "reasoning": "5-8 lines with dates + logic + counter-evidence",
-      "sources": ["Source - YYYY-MM-DD - description"],
+      "sources": ["Source - YYYY-MM-DD - URL - description"],
       "risks": "2-3 lines",
       "resolutionCriteria": "verified resolution rules",
       "expiresInMin": 0,
@@ -321,8 +335,9 @@ export async function analyzeMarketsWithClaude(
     },
     body: JSON.stringify({
       model: modelId,
-      max_tokens: 8192,
+      max_tokens: 16384,
       temperature: 0.3,
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }],
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -341,8 +356,14 @@ export async function analyzeMarketsWithClaude(
   const outputTokens = data.usage?.output_tokens || 0;
   const costUsd = calculateTokenCost(inputTokens, outputTokens, modelId);
 
-  // Parse response content first so we can store it in usage
-  const content = data.content?.[0]?.text || "";
+  // With web_search, response has multiple content blocks:
+  // [server_tool_use, web_search_tool_result, ..., text (final JSON)]
+  const contentBlocks: any[] = data.content || [];
+  const textBlocks = contentBlocks.filter((b: any) => b.type === "text");
+  const content = textBlocks.length > 0 ? textBlocks[textBlocks.length - 1].text : "";
+  // Count web searches for logging
+  const webSearchCount = contentBlocks.filter((b: any) => b.type === "server_tool_use" && b.name === "web_search").length;
+  if (webSearchCount > 0) log(`🌐 Web searches performed: ${webSearchCount}`);
   _lastRawResponse = content;
 
   log(`✅ Respuesta: ${elapsed}ms, ${inputTokens}↓ / ${outputTokens}↑, costo: $${costUsd.toFixed(4)}`);

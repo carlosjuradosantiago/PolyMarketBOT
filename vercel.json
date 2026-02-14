@@ -3,6 +3,11 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]",
+  "functions": {
+    "api/claude.js": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     {
       "source": "/api/gamma/:path*",

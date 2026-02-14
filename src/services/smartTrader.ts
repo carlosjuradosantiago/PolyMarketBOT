@@ -449,8 +449,15 @@ function buildShortTermPool(
     // These almost always end up rejected and waste Claude tokens
     if (timeLeft <= 10 * 60 * 1000) { bd.expired++; continue; }
 
+    const q = m.question.toLowerCase();
+
     // ═══ HARD LIQUIDITY/VOLUME FILTER ═══
-    if (m.liquidity < MIN_LIQUIDITY || m.volume < MIN_VOLUME) {
+    // Weather exception: thin but high-edge markets with >12h horizon allow lower thresholds
+    // (patient limit orders fill at better prices in these markets)
+    const isWeatherMarket = weatherPatterns.test(q) && timeLeft > 12 * 60 * 60 * 1000;
+    const minLiq = isWeatherMarket ? 100 : MIN_LIQUIDITY;
+    const minVol = isWeatherMarket ? 200 : MIN_VOLUME;
+    if (m.liquidity < minLiq || m.volume < minVol) {
       bd.lowLiquidity++;
       continue;
     }
@@ -462,8 +469,6 @@ function buildShortTermPool(
       bd.junk++; // count as junk since they're untradeable
       continue;
     }
-
-    const q = m.question.toLowerCase();
 
     // ─── Junk / noise (ALWAYS excluded, no progressive) ───
     const junkPatterns = [
