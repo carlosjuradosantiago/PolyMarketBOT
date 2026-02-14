@@ -105,7 +105,7 @@ function buildOSINTPrompt(
 
   // Blacklist: markets we already have positions in
   const blacklist = openOrders.length > 0
-    ? openOrders.map(o => `  - [ID:${o.marketId}] "${o.marketQuestion.slice(0, 60)}" → ${o.outcome} @ ${(o.price * 100).toFixed(0)}¢`).join("\n")
+    ? openOrders.map(o => `  - [ID:${o.marketId}] "${o.marketQuestion.slice(0, 100)}" → ${o.outcome} @ ${(o.price * 100).toFixed(0)}¢`).join("\n")
     : "  (none)";
 
   // Compact market list
@@ -123,7 +123,7 @@ function buildOSINTPrompt(
 
   // Performance history line (calibration feedback)
   const historyLine = history && history.totalTrades > 0
-    ? `HISTORY: ${history.totalTrades} resolved trades | W ${history.wins} / L ${history.losses} | Win rate: ${history.winRate.toFixed(0)}% | PnL: $${history.totalPnl.toFixed(2)}\n  → ${history.winRate >= 55 ? "Calibration OK — maintain discipline." : history.winRate >= 45 ? "Marginal — tighten confidence thresholds, require stronger edge." : "Poor — be MORE conservative, raise minimum confidence to 70, minimum edge to 0.12."}`
+    ? `HISTORY: {"trades": ${history.totalTrades}, "wins": ${history.wins}, "losses": ${history.losses}, "winRate": ${(history.winRate / 100).toFixed(2)}, "roi": ${history.totalPnl !== 0 ? (history.totalPnl / 100).toFixed(3) : "0.000"}, "pnl": ${history.totalPnl.toFixed(2)}}\n  → ${history.winRate >= 55 ? "Calibration OK — maintain discipline." : history.winRate >= 45 ? "Marginal — tighten confidence thresholds, require stronger edge." : "Poor — be MORE conservative, raise minimum confidence to 70, minimum edge to 0.12."}`
     : "HISTORY: No resolved trades yet — be conservative, require strong evidence.";
 
   return `You are a QUANTITATIVE MISPRICING SCANNER for Polymarket.
@@ -132,14 +132,17 @@ Detect when public information (polls, weather data, indicators, odds, official 
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | RISK: medium-low (preserve capital > maximize return)
 ${historyLine}
 
-═══ DATA SOURCES BY CATEGORY ═══
-Politics: RCP/538/Quinnipiac polls, congress.gov, official statements, legislative calendars
-Economy: BLS/BEA/Fed data, Bloomberg/Reuters consensus, macro indicators
-Weather: NWS/NOAA/Weather.gov, GFS/ECMWF models, historical averages, seasonality
-Sports: bookmaker lines (if available in your training data), injury reports, team stats, H2H records
-Events/Regulation: court decisions, FDA/FCC/SEC calendars, scheduled deadlines
-Geopolitics: summits, elections, treaties, UN resolutions
-Tech/Science: launches, publications, conferences
+═══ YOUR KNOWLEDGE (no live web access) ═══
+You have NO internet access. Use ONLY what you know from training data (cutoff ~early 2025).
+For events AFTER your cutoff, you must rely on: scheduled dates, historical patterns, seasonal averages, and structural analysis.
+Do NOT pretend to have live data you don't have. If a market depends on data you can't know → low confidence.
+
+Useful knowledge by category:
+  Politics: historical poll trends, legislative calendars, election cycles, incumbency patterns
+  Economy: seasonal macro patterns, scheduled data releases, historical indicator ranges
+  Weather: climatological averages, seasonal norms, historical temperature distributions
+  Sports: historical team performance, H2H records, league standings patterns (but odds may be stale)
+  Events: scheduled deadlines, regulatory calendars, historical precedents
 → DIVERSIFY recommendations across categories. Don't cluster in a single topic.
 
 ═══ BLACKLIST (FORBIDDEN — already have position) ═══
@@ -153,15 +156,19 @@ ${marketLines}
 ─── STEP 1: SCAN (all ${shortTermMarkets.length} markets) ───
 For EACH market assign:
   category | confidence_prelim (0-100) | flag: "candidate" (≥50 + you have data) or "reject"
+  prelimSide: "YES" | "NO" — which side you see potential edge on (even for rejects, best guess)
   Sports only: marketType (moneyline|spread|total|draw|btts|prop), line (exact number or null).
   Sports lines must match exactly (e.g. O/U 146.5 vs O/U 146.5, NOT vs 148).
 → ALL markets go into "scanned" array.
 
-─── STEP 2: RESEARCH (top 3-5 candidates) ───
+─── STEP 2: RESEARCH (top 3-5 candidates, using prelimSide from Step 1) ───
 For each candidate:
   1. Verify resolution rules (official source, definition, timezone). Can't verify → confidence ≤ 40, don't recommend.
-  2. Find ≥2 concrete dated data points. Use primary sources from your knowledge. Cite with dates (YYYY-MM-DD).
+  2. Find ≥2 concrete dated data points from your training knowledge. Cite with dates (YYYY-MM-DD).
   3. Detect clusterId (mutually exclusive markets). Max 1 recommendation per cluster.
+     Example: markets [3] "Real Madrid vs Sociedad — Madrid win" and [7] "Real Madrid vs Sociedad — draw"
+     → same match → clusterId: "rm-rso-20260214". Pick only the best edge.
+     Example: markets [11] "Seoul high temp ≥8°C" and [12] "Seoul high temp ≥9°C" → clusterId: "seoul-temp-0214".
   4. Estimate pReal + [pLow, pHigh] (80% credible interval).
 
 ─── STEP 3: SIZE + DECIDE ───
@@ -170,9 +177,10 @@ See EDGE, FRICTION, and KELLY rules below. If all thresholds met → "recommenda
 ═══ CORE RULES ═══
 
 SIDE-AWARE MATH (critical — prevents phantom edge):
-  If recommendedSide=YES → pMarket=YES_price, pReal=your YES estimate.
-  If recommendedSide=NO  → pMarket=1-YES_price, pReal=1-pReal_YES.
-  edge = pReal - pMarket. All values (pReal, pLow, pHigh, edge, evNet) on the SAME side.
+  If recommendedSide=YES → pMarket = YES_price (from market data), pReal = your YES probability.
+  If recommendedSide=NO  → pMarket = NO_price (from market data, NOT 1-YES — there's spread), pReal = your NO probability.
+  Note: YES_price + NO_price ≠ 1.00 due to spread. Always use the ACTUAL price shown for each side.
+  edge = pReal - pMarket. All values (pReal, pLow, pHigh, edge, evNet) must be on the SAME side.
 
 DYNAMIC FRICTION (by liquidity tier):
   spread_est:   Liq≥$50K→0.5% | $10-50K→1.0% | $2-10K→2.0% | <$2K→3.5%
@@ -187,10 +195,11 @@ THRESHOLDS TO RECOMMEND:
   Price must be 3¢-97¢ (prefer 15¢-85¢ range). Outside → reject.
 
 SPORTS-SPECIFIC:
-  If you have bookmaker odds in training data → normalize with vig removal:
+  You likely do NOT have current bookmaker odds (training data is stale for live sports).
+  Use historical team stats, H2H records, league standings, and structural analysis.
+  Require edge ≥ 0.12 for sports (higher bar due to no live odds).
+  If you DO have relevant odds knowledge, normalize with vig removal:
     pFair = pRaw / (pTeam1 + pTeam2), then edge = pFair - pMarket.
-  If you do NOT have current bookmaker odds → acknowledge in reasoning, use statistical/historical analysis instead.
-    In this case require edge ≥ 0.12 (higher bar to compensate for uncertainty).
 
 CONFIDENCE RULES (single source of truth):
   < 2 dated sources → confidence ≤ 40, don't recommend.
@@ -222,6 +231,7 @@ Respond with JSON inside a code fence. Example:
       "category": "politics|economy|weather|sports|...|other",
       "flag": "candidate|reject",
       "notes": "1-2 lines: why rejected or analysis notes",
+      "prelimSide": "YES|NO",
       "confidence_prelim": 0,
       "clusterId": "...|null",
       "marketType": "moneyline|spread|total|...|null",
