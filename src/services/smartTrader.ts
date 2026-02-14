@@ -295,6 +295,62 @@ const MIN_POOL_TARGET = 15;
 
 const FILTER_LEVEL_LABELS = ["Estricto", "+Deportes", "+Deportes+Crypto", "Todo (sin junk)"];
 
+/** Max batches per cycle — if 0 bets placed, try next batch immediately */
+const MAX_BATCHES_PER_CYCLE = 3;
+
+// ─── Category classifier for pool diversification ─────
+const weatherPatterns = /temperature|°[cf]|weather|rain|snow|hurricane|tornado|wind speed|heat wave|cold|frost|humidity|celsius|fahrenheit|forecast|precipitation|storm|flood|drought|wildfire|nws|noaa/;
+const politicsPatterns = /trump|biden|harris|congress|senate|house of rep|election|vote|poll|president|governor|democrat|republican|gop|legislation|bill sign|executive order|supreme court|scotus|impeach|primary|caucus|cabinet|veto|filibuster/;
+const geopoliticsPatterns = /war|military|invasion|nato|united nations|\bun\b|sanction|tariff|trade war|ceasefire|peace deal|treaty|summit|nuclear|missile|refugee|occupation|annexation/;
+const entertainmentPatterns = /oscar|grammy|emmy|movie|film|box office|album|song|concert|tv show|series|streaming|netflix|disney|spotify|billboard|ratings|premiere|celebrity|award/;
+
+function classifyMarketCategory(question: string): string {
+  const q = question.toLowerCase();
+  if (sportsPatterns.some(p => q.includes(p))) return 'sports';
+  if (cryptoPatterns.some(p => q.includes(p))) return 'crypto';
+  if (stockPatterns.some(p => q.includes(p))) return 'finance';
+  if (weatherPatterns.test(q)) return 'weather';
+  if (politicsPatterns.test(q)) return 'politics';
+  if (geopoliticsPatterns.test(q)) return 'geopolitics';
+  if (entertainmentPatterns.test(q)) return 'entertainment';
+  return 'other';
+}
+
+/**
+ * Pick up to `maxSize` markets from `markets`, interleaving categories via round-robin.
+ * Within each category, markets are sorted by volume (best first).
+ * This ensures the batch sent to Claude has diverse topics.
+ */
+function diversifyPool(markets: PolymarketMarket[], maxSize: number): PolymarketMarket[] {
+  const buckets = new Map<string, PolymarketMarket[]>();
+  for (const m of markets) {
+    const cat = classifyMarketCategory(m.question);
+    if (!buckets.has(cat)) buckets.set(cat, []);
+    buckets.get(cat)!.push(m);
+  }
+  // Sort each bucket by volume descending
+  for (const [, arr] of buckets) arr.sort((a, b) => b.volume - a.volume);
+
+  const result: PolymarketMarket[] = [];
+  const categories = [...buckets.keys()];
+  let round = 0;
+
+  while (result.length < maxSize) {
+    let added = false;
+    for (const cat of categories) {
+      const arr = buckets.get(cat)!;
+      if (round < arr.length) {
+        result.push(arr[round]);
+        added = true;
+        if (result.length >= maxSize) break;
+      }
+    }
+    if (!added) break;
+    round++;
+  }
+  return result;
+}
+
 /** Sports / betting patterns */
 const sportsPatterns = [
   "nba", "nfl", "mlb", "nhl", "soccer", "football", "basketball", "baseball",
@@ -655,17 +711,26 @@ async function _runSmartCycleInner(
     };
   }
 
-  // ─── Step 2: Cap pool & Cost Pre-Check ─────────
-  // Send up to 30 markets to Claude (reduce token cost significantly)
+  // ─── Step 2: Build category-diverse batches ─────────
+  // Instead of sending top-30-by-volume (which may all be one category),
+  // interleave categories so Claude sees weather + politics + sports + etc.
   const MAX_POOL_FOR_ANALYSIS = 30;
-  if (pool.length > MAX_POOL_FOR_ANALYSIS) {
-    log(`✂️ Pool recortado: ${pool.length} → ${MAX_POOL_FOR_ANALYSIS} mercados (ordenado por volumen, top liquidez)`);
-    pool.length = MAX_POOL_FOR_ANALYSIS;
+  const fullPool = [...pool]; // keep reference to full pool for market lookup
+  const diversified = diversifyPool(pool, pool.length); // reorder, don't truncate yet
+
+  // Split into batches of MAX_POOL_FOR_ANALYSIS
+  const batches: PolymarketMarket[][] = [];
+  for (let i = 0; i < diversified.length; i += MAX_POOL_FOR_ANALYSIS) {
+    batches.push(diversified.slice(i, i + MAX_POOL_FOR_ANALYSIS));
   }
+  // Cap total batches per cycle
+  if (batches.length > MAX_BATCHES_PER_CYCLE) batches.length = MAX_BATCHES_PER_CYCLE;
+
+  log(`📦 Pool dividido en ${batches.length} batch(es) de ≤${MAX_POOL_FOR_ANALYSIS} mercados (diversificado por categoría)`);
 
   // shouldAnalyze uses equity so AI cost check is proportional to total portfolio
   const equityForAnalysis = portfolio.balance + portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
-  if (!shouldAnalyze(equityForAnalysis, pool.length)) {
+  if (!shouldAnalyze(equityForAnalysis, batches[0]?.length || 0)) {
     const msg = "💸 Costo de IA excede límite seguro para bankroll actual.";
     activities.push(activity(msg, "Warning"));
     debugLog.error = msg;
@@ -679,300 +744,287 @@ async function _runSmartCycleInner(
     };
   }
 
-  // Throttle already checked at Step 0.5 — if we reach here, we're clear to call Claude.
-  const poolForClaude = pool;
-
-  // ─── Step 3: Claude OSINT Analysis ───────────
-  let aiResult: ClaudeResearchResult;
-
+  // Fetch performance history once (used for all batches)
+  let perfHistory: PerformanceHistory | undefined;
   try {
-    activities.push(activity(`📡 Enviando ${poolForClaude.length} mercados ${expiryLabel} a Claude para análisis OSINT...`, "Inference"));
+    const stats = await dbGetStats();
+    perfHistory = {
+      totalTrades: stats.totalTrades,
+      wins: stats.wins,
+      losses: stats.losses,
+      totalPnl: stats.totalPnl,
+      winRate: stats.winRate,
+    };
+  } catch (e) {
+    log("⚠️ Could not fetch performance history:", e);
+  }
 
-    // ── CRITICAL: Set throttle BEFORE calling Claude ──
-    // This prevents HMR/re-render from starting another call while this one is in-flight.
-    // If Claude fails, we "waste" a throttle period — better than double-charging.
-    _lastClaudeCallTime = Date.now();
-    _persistThrottleState();
-    log(`🔒 Throttle PRE-SET a ${new Date(_lastClaudeCallTime).toLocaleTimeString()} (antes de enviar a Claude)`);
+  // ─── Step 3: Multi-batch Claude Analysis Loop ───────────
+  // If batch N yields 0 bets AND more batches remain → try batch N+1 immediately.
+  // Stop when: bets placed, all batches exhausted, or error.
+  let totalBetsThisCycle = 0;
+  let totalRecommendations = 0;
+  let lastAiResult: ClaudeResearchResult | null = null;
+  let totalAICostCycle = 0;
 
-    // Use EQUITY (cash + invested) as bankroll, not just cash balance
-    const equityForClaude = portfolio.balance + portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
+  // Set throttle BEFORE starting (prevents concurrent cycles)
+  _lastClaudeCallTime = Date.now();
+  _persistThrottleState();
 
-    // Fetch performance history for calibration feedback
-    let perfHistory: PerformanceHistory | undefined;
+  for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+    const batch = batches[batchIdx];
+    const batchLabel = `Batch ${batchIdx + 1}/${batches.length}`;
+
+    log(`\n═══ ${batchLabel}: ${batch.length} mercados ═══`);
+    activities.push(activity(`📡 ${batchLabel}: Enviando ${batch.length} mercados ${expiryLabel} a Claude...`, "Inference"));
+
+    let aiResult: ClaudeResearchResult;
+
     try {
-      const stats = await dbGetStats();
-      perfHistory = {
-        totalTrades: stats.totalTrades,
-        wins: stats.wins,
-        losses: stats.losses,
-        totalPnl: stats.totalPnl,
-        winRate: stats.winRate,
-      };
-    } catch (e) {
-      log("⚠️ Could not fetch performance history:", e);
+      const equityForClaude = updatedPortfolio.balance + updatedPortfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
+
+      aiResult = await analyzeMarketsWithClaude(
+        batch,
+        updatedPortfolio.openOrders,
+        equityForClaude,
+        claudeModel,
+        perfHistory,
+      );
+
+      lastAiResult = aiResult;
+      totalAICostCycle += aiResult.usage.costUsd;
+
+      // Update debug log with latest batch info
+      debugLog.prompt = aiResult.prompt;
+      debugLog.rawResponse = aiResult.rawResponse;
+      debugLog.inputTokens += aiResult.usage.inputTokens;
+      debugLog.outputTokens += aiResult.usage.outputTokens;
+      debugLog.costUsd += aiResult.usage.costUsd;
+      debugLog.responseTimeMs += aiResult.responseTimeMs;
+      debugLog.summary = aiResult.summary;
+      debugLog.recommendations += aiResult.analyses.length;
+      totalRecommendations += aiResult.analyses.length;
+
+      // Mark batch markets as analyzed
+      _markAnalyzed(batch.map(m => m.id));
+
+      log(`🔬 ${batchLabel}: ${aiResult.analyses.length} recomendaciones — Costo: ${formatCost(aiResult.usage.costUsd)} (${aiResult.responseTimeMs}ms)`);
+      log(`💡 ${aiResult.summary}`);
+
+      activities.push(activity(
+        `🔬 ${batchLabel}: ${aiResult.analyses.length} recs — ${formatCost(aiResult.usage.costUsd)} (${aiResult.responseTimeMs}ms)`,
+        "Inference"
+      ));
+
+    } catch (error: any) {
+      const errMsg = error?.message || String(error);
+      log(`❌ ${batchLabel} error:`, errMsg);
+      activities.push(activity(`❌ ${batchLabel}: ${errMsg.slice(0, 100)}`, "Error"));
+      debugLog.error = errMsg;
+      break; // Stop trying more batches on error
     }
 
-    aiResult = await analyzeMarketsWithClaude(
-      poolForClaude,
-      portfolio.openOrders,
-      equityForClaude,
-      claudeModel,
-      perfHistory,
-    );
+    // ─── Process recommendations from this batch ──
+    const dedupedAnalyses = deduplicateCorrelatedMarkets(aiResult.analyses);
 
-    debugLog.prompt = aiResult.prompt;
-    debugLog.rawResponse = aiResult.rawResponse;
-    debugLog.inputTokens = aiResult.usage.inputTokens;
-    debugLog.outputTokens = aiResult.usage.outputTokens;
-    debugLog.costUsd = aiResult.usage.costUsd;
-    debugLog.responseTimeMs = aiResult.responseTimeMs;
-    debugLog.summary = aiResult.summary;
-    debugLog.recommendations = aiResult.analyses.length;
-
-    // Update throttle timestamp AFTER successful Claude call (more accurate)
-    _lastClaudeCallTime = Date.now();
-    _persistThrottleState();
-
-    // Mark all markets in this batch as recently-analyzed
-    _markAnalyzed(poolForClaude.map(m => m.id));
-
-    log(`🔬 Claude recomienda ${aiResult.analyses.length} mercados — Costo: ${formatCost(aiResult.usage.costUsd)} (${aiResult.responseTimeMs}ms)`);
-    log(`💡 ${aiResult.summary}`);
-
-    activities.push(activity(
-      `🔬 Claude: ${aiResult.analyses.length} recomendaciones — Costo: ${formatCost(aiResult.usage.costUsd)} (${aiResult.responseTimeMs}ms)`,
-      "Inference"
-    ));
-
-  } catch (error: any) {
-    const errMsg = error?.message || String(error);
-    log("❌ Error de Claude:", errMsg);
-    activities.push(activity(`❌ Error: ${errMsg.slice(0, 100)}`, "Error"));
-    debugLog.error = errMsg;
-    _cycleLogs.unshift(debugLog);
-    if (_cycleLogs.length > 20) _cycleLogs.length = 20;
-    dbSaveCycleLog(debugLog).catch(e => console.error("[SmartTrader] DB cycle log save failed:", e));
-    return {
-      portfolio: updatedPortfolio, betsPlaced: [], marketsAnalyzed: 0,
-      marketsEligible: pool.length, aiUsage: null,
-      nextScanSeconds: SCAN_INTERVAL_SECS, activities,
-      skippedReason: `AI error: ${errMsg.slice(0, 100)}`,
-    };
-  }
-
-  // ─── Step 4: Cluster dedup + Kelly Criterion ──
-  // Detect correlated markets locally (e.g., "Seoul 8°C" and "Seoul 9°C")
-  // Group by similarity and only keep best edge per cluster
-  const dedupedAnalyses = deduplicateCorrelatedMarkets(aiResult.analyses);
-  
-  if (dedupedAnalyses.length < aiResult.analyses.length) {
-    const skipped = aiResult.analyses.length - dedupedAnalyses.length;
-    log(`🔗 Cluster dedup: ${aiResult.analyses.length} → ${dedupedAnalyses.length} (${skipped} correlacionados eliminados)`);
-    activities.push(activity(
-      `🔗 Dedup clusters: ${skipped} mercados correlacionados eliminados (de ${aiResult.analyses.length} recomendaciones)`,
-      "Info"
-    ));
-  }
-
-  let betsThisCycle = 0;
-
-  log("────────────────────────────────────────────────");
-  log("📊 RECOMENDACIONES + KELLY:");
-  log("────────────────────────────────────────────────");
-
-  for (const analysis of dedupedAnalyses) {
-    const rr: RecommendationResult = {
-      marketId: analysis.marketId,
-      question: analysis.question,
-      recommendedSide: analysis.recommendedSide,
-      pMarket: analysis.pMarket,
-      pReal: analysis.pReal,
-      edge: analysis.edge,
-      confidence: analysis.confidence,
-      reasoning: analysis.reasoning,
-      sources: analysis.sources || [],
-      decision: "SKIP — processing",
-    };
-
-    // Find the market by exact ID from the full pool (not just poolForClaude)
-    let market = pool.find(m => m.id === analysis.marketId);
-
-    // Fallback: try matching by question text if ID doesn't match
-    if (!market && analysis.question) {
-      const normQ = analysis.question.toLowerCase().trim();
-      market = pool.find(m => m.question.toLowerCase().trim() === normQ);
-      if (!market) {
-        // Partial match
-        market = pool.find(m =>
-          m.question.toLowerCase().includes(normQ.slice(0, 40)) ||
-          normQ.includes(m.question.toLowerCase().slice(0, 40))
-        );
-      }
-      if (market) {
-        log(`  ⚠️ ID no coincide, match por texto: "${market.question.slice(0, 50)}"`);
-      }
+    if (dedupedAnalyses.length < aiResult.analyses.length) {
+      const skippedDedup = aiResult.analyses.length - dedupedAnalyses.length;
+      log(`🔗 Cluster dedup: ${aiResult.analyses.length} → ${dedupedAnalyses.length} (${skippedDedup} correlacionados eliminados)`);
     }
 
-    if (!market) {
-      rr.decision = "SKIP — Market ID not found in pool";
-      debugLog.results.push(rr);
-      log(`  ❌ ID "${analysis.marketId}" no encontrado — SKIP`);
-      activities.push(activity(`❌ Mercado no encontrado: "${analysis.question.slice(0, 45)}..."`, "Warning"));
-      continue;
-    }
+    let betsThisBatch = 0;
 
-    // Use REAL market prices (not Claude's estimate)
-    const prices = market.outcomePrices.map(p => parseFloat(p));
-    const yesPrice = prices[0] || 0.5;
-    const noPrice = prices[1] || (1 - yesPrice);
-
-    // Recalculate edge with real prices
-    const enrichedAnalysis: MarketAnalysis = {
-      ...analysis,
-      marketId: market.id,
-      pMarket: analysis.recommendedSide === "YES" ? yesPrice : noPrice,
-      edge: analysis.recommendedSide === "YES"
-        ? analysis.pReal - yesPrice
-        : (1 - analysis.pReal) - noPrice,
-    };
-
-    rr.pMarket = enrichedAnalysis.pMarket;
-    rr.edge = enrichedAnalysis.edge;
-
-    const endMs = new Date(market.endDate).getTime();
-    const minutesLeft = Math.max(0, Math.round((endMs - now) / 60000));
-
-    log(`\n  📌 "${analysis.question.slice(0, 55)}"`);
-    log(`     ${analysis.recommendedSide} | pMkt(real)=${(enrichedAnalysis.pMarket * 100).toFixed(1)}% | pReal=${(analysis.pReal * 100).toFixed(1)}% | edge=${(enrichedAnalysis.edge * 100).toFixed(1)}% | conf=${analysis.confidence} | ${minutesLeft}min`);
-
-    // Kelly sizing — use EQUITY (balance + invested) as bankroll base,
-    // not just free cash. Kelly sizes proportionally to total portfolio.
-    const investedInOrders = updatedPortfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
-    const equity = updatedPortfolio.balance + investedInOrders;
-    const kelly = calculateKellyBet(
-      enrichedAnalysis,
-      market,
-      equity,                                    // <- full equity, not just cash
-      aiResult.usage.costUsd,
-      Math.max(1, aiResult.analyses.length),
-      updatedPortfolio.balance,                   // <- available cash for cap
-    );
-
-    rr.kellyResult = kelly;
-
-    log(`     Kelly: raw=${(kelly.rawKelly * 100).toFixed(2)}% | ¼K=${(kelly.fractionalKelly * 100).toFixed(2)}% | $${kelly.betAmount.toFixed(2)} | EV=$${kelly.expectedValue.toFixed(4)}`);
-
-    if (kelly.betAmount <= 0) {
-      rr.decision = `SKIP — ${kelly.reasoning}`;
-      debugLog.results.push(rr);
-      log(`     ⏭️ SKIP — ${kelly.reasoning}`);
-      activities.push(activity(`⏭️ SKIP: "${market.question.slice(0, 40)}..." — ${kelly.reasoning}`, "Info"));
-      continue;
-    }
-
-    // ─── Place Bet ─────────────────────────────
-    const quantity = kelly.betAmount / kelly.price;
-
-    const { order, portfolio: newPortfolio, error } = createPaperOrder(
-      market, kelly.outcomeIndex, "buy", quantity, updatedPortfolio,
-    );
-
-    if (error || !order) {
-      rr.decision = `ERROR — ${error}`;
-      debugLog.results.push(rr);
-      log(`     ❌ Orden fallida: ${error}`);
-      activities.push(activity(`❌ Orden fallida: ${error}`, "Error"));
-      continue;
-    }
-
-    // Attach AI reasoning
-    order.aiReasoning = {
-      claudeAnalysis: {
-        pMarket: enrichedAnalysis.pMarket,
-        pReal: analysis.pReal,
-        pLow: analysis.pLow,
-        pHigh: analysis.pHigh,
-        edge: enrichedAnalysis.edge,
-        confidence: analysis.confidence,
+    for (const analysis of dedupedAnalyses) {
+      const rr: RecommendationResult = {
+        marketId: analysis.marketId,
+        question: analysis.question,
         recommendedSide: analysis.recommendedSide,
+        pMarket: analysis.pMarket,
+        pReal: analysis.pReal,
+        edge: analysis.edge,
+        confidence: analysis.confidence,
         reasoning: analysis.reasoning,
         sources: analysis.sources || [],
-        // SCALP fields
-        evNet: analysis.evNet,
-        maxEntryPrice: analysis.maxEntryPrice,
-        sizeUsd: analysis.sizeUsd,
-        orderType: analysis.orderType,
-        clusterId: analysis.clusterId,
-        risks: analysis.risks,
-        resolutionCriteria: analysis.resolutionCriteria,
-      },
-      kelly: {
-        rawKelly: kelly.rawKelly,
-        fractionalKelly: kelly.fractionalKelly,
-        betAmount: kelly.betAmount,
-        expectedValue: kelly.expectedValue,
-        aiCostPerBet: kelly.aiCostPerBet,
-      },
-      model: debugLog.model,
-      costUsd: aiResult.usage.costUsd / Math.max(1, aiResult.analyses.length),
-      timestamp: new Date().toISOString(),
-      fullPrompt: aiResult.prompt,
-      fullResponse: aiResult.rawResponse,
-    };
+        decision: "SKIP — processing",
+      };
 
-    const orderIdx = newPortfolio.openOrders.findIndex(o => o.id === order.id);
-    if (orderIdx >= 0) {
-      newPortfolio.openOrders[orderIdx] = order;
-      // Don't call savePortfolio here — balance is computed from orders on load
+      // Find the market by exact ID from the full pool
+      let market = fullPool.find(m => m.id === analysis.marketId);
+
+      if (!market && analysis.question) {
+        const normQ = analysis.question.toLowerCase().trim();
+        market = fullPool.find(m => m.question.toLowerCase().trim() === normQ);
+        if (!market) {
+          market = fullPool.find(m =>
+            m.question.toLowerCase().includes(normQ.slice(0, 40)) ||
+            normQ.includes(m.question.toLowerCase().slice(0, 40))
+          );
+        }
+        if (market) log(`  ⚠️ ID no coincide, match por texto: "${market.question.slice(0, 50)}"`);
+      }
+
+      if (!market) {
+        rr.decision = "SKIP — Market ID not found in pool";
+        debugLog.results.push(rr);
+        log(`  ❌ ID "${analysis.marketId}" no encontrado — SKIP`);
+        continue;
+      }
+
+      const prices = market.outcomePrices.map(p => parseFloat(p));
+      const yesPrice = prices[0] || 0.5;
+      const noPrice = prices[1] || (1 - yesPrice);
+
+      const enrichedAnalysis: MarketAnalysis = {
+        ...analysis,
+        marketId: market.id,
+        pMarket: analysis.recommendedSide === "YES" ? yesPrice : noPrice,
+        edge: analysis.recommendedSide === "YES"
+          ? analysis.pReal - yesPrice
+          : (1 - analysis.pReal) - noPrice,
+      };
+
+      rr.pMarket = enrichedAnalysis.pMarket;
+      rr.edge = enrichedAnalysis.edge;
+
+      const endMs = new Date(market.endDate).getTime();
+      const minutesLeft = Math.max(0, Math.round((endMs - now) / 60000));
+
+      log(`\n  📌 "${analysis.question.slice(0, 55)}"`);
+      log(`     ${analysis.recommendedSide} | pMkt(real)=${(enrichedAnalysis.pMarket * 100).toFixed(1)}% | pReal=${(analysis.pReal * 100).toFixed(1)}% | edge=${(enrichedAnalysis.edge * 100).toFixed(1)}% | conf=${analysis.confidence} | ${minutesLeft}min`);
+
+      const investedInOrders = updatedPortfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
+      const equity = updatedPortfolio.balance + investedInOrders;
+      const kelly = calculateKellyBet(
+        enrichedAnalysis,
+        market,
+        equity,
+        aiResult.usage.costUsd,
+        Math.max(1, aiResult.analyses.length),
+        updatedPortfolio.balance,
+      );
+
+      rr.kellyResult = kelly;
+      log(`     Kelly: raw=${(kelly.rawKelly * 100).toFixed(2)}% | ¼K=${(kelly.fractionalKelly * 100).toFixed(2)}% | $${kelly.betAmount.toFixed(2)} | EV=$${kelly.expectedValue.toFixed(4)}`);
+
+      if (kelly.betAmount <= 0) {
+        rr.decision = `SKIP — ${kelly.reasoning}`;
+        debugLog.results.push(rr);
+        log(`     ⏭️ SKIP — ${kelly.reasoning}`);
+        continue;
+      }
+
+      // ─── Place Bet ─────────────────────────────
+      const quantity = kelly.betAmount / kelly.price;
+      const { order, portfolio: newPortfolio, error } = createPaperOrder(
+        market, kelly.outcomeIndex, "buy", quantity, updatedPortfolio,
+      );
+
+      if (error || !order) {
+        rr.decision = `ERROR — ${error}`;
+        debugLog.results.push(rr);
+        log(`     ❌ Orden fallida: ${error}`);
+        continue;
+      }
+
+      order.aiReasoning = {
+        claudeAnalysis: {
+          pMarket: enrichedAnalysis.pMarket,
+          pReal: analysis.pReal,
+          pLow: analysis.pLow,
+          pHigh: analysis.pHigh,
+          edge: enrichedAnalysis.edge,
+          confidence: analysis.confidence,
+          recommendedSide: analysis.recommendedSide,
+          reasoning: analysis.reasoning,
+          sources: analysis.sources || [],
+          evNet: analysis.evNet,
+          maxEntryPrice: analysis.maxEntryPrice,
+          sizeUsd: analysis.sizeUsd,
+          orderType: analysis.orderType,
+          clusterId: analysis.clusterId,
+          risks: analysis.risks,
+          resolutionCriteria: analysis.resolutionCriteria,
+        },
+        kelly: {
+          rawKelly: kelly.rawKelly,
+          fractionalKelly: kelly.fractionalKelly,
+          betAmount: kelly.betAmount,
+          expectedValue: kelly.expectedValue,
+          aiCostPerBet: kelly.aiCostPerBet,
+        },
+        model: debugLog.model,
+        costUsd: aiResult.usage.costUsd / Math.max(1, aiResult.analyses.length),
+        timestamp: new Date().toISOString(),
+        fullPrompt: aiResult.prompt,
+        fullResponse: aiResult.rawResponse,
+      };
+
+      const orderIdx = newPortfolio.openOrders.findIndex(o => o.id === order.id);
+      if (orderIdx >= 0) {
+        newPortfolio.openOrders[orderIdx] = order;
+      }
+
+      dbUpdateOrder({ id: order.id, aiReasoning: order.aiReasoning, status: order.status }).catch(
+        e => console.error("[SmartTrader] DB update aiReasoning failed:", e)
+      );
+
+      updatedPortfolio = newPortfolio;
+      betsThisBatch++;
+      totalBetsThisCycle++;
+      betsPlaced.push(kelly);
+
+      rr.decision = `BET $${kelly.betAmount.toFixed(2)}`;
+      debugLog.results.push(rr);
+
+      activities.push(activity(
+        `🎯 APUESTA: ${kelly.outcomeName} "${market.question.slice(0, 40)}..." @ ${(kelly.price * 100).toFixed(0)}¢ | $${kelly.betAmount.toFixed(2)} | Edge ${(enrichedAnalysis.edge * 100).toFixed(1)}% | ⏱️${minutesLeft}min`,
+        "Order"
+      ));
+
+      log(`     ✅ BET: ${kelly.outcomeName} — $${kelly.betAmount.toFixed(2)} @ ${(kelly.price * 100).toFixed(1)}¢ — ${minutesLeft}min left`);
     }
 
-    // Persist aiReasoning to DB
-    dbUpdateOrder({ id: order.id, aiReasoning: order.aiReasoning, status: order.status }).catch(
-      e => console.error("[SmartTrader] DB update aiReasoning failed:", e)
-    );
+    // If we placed bets this batch → stop (don't burn more API calls)
+    if (betsThisBatch > 0) {
+      log(`✅ ${batchLabel} colocó ${betsThisBatch} apuesta(s) — deteniendo batches.`);
+      break;
+    }
 
-    updatedPortfolio = newPortfolio;
-    betsThisCycle++;
-    betsPlaced.push(kelly);
+    // If no bets and more batches remain → log and continue immediately
+    if (batchIdx < batches.length - 1) {
+      log(`📭 ${batchLabel}: 0 apuestas — probando siguiente batch inmediatamente...`);
+      activities.push(activity(`📭 ${batchLabel}: 0 apuestas — probando siguiente batch...`, "Info"));
+    }
+  } // end batch loop
 
-    rr.decision = `BET $${kelly.betAmount.toFixed(2)}`;
-    debugLog.results.push(rr);
-
-    activities.push(activity(
-      `🎯 APUESTA: ${kelly.outcomeName} "${market.question.slice(0, 40)}..." @ ${(kelly.price * 100).toFixed(0)}¢ | $${kelly.betAmount.toFixed(2)} | Edge ${(enrichedAnalysis.edge * 100).toFixed(1)}% | ⏱️${minutesLeft}min`,
-      "Order"
-    ));
-
-    log(`     ✅ BET: ${kelly.outcomeName} — $${kelly.betAmount.toFixed(2)} @ ${(kelly.price * 100).toFixed(1)}¢ — ${minutesLeft}min left`);
-
-    // No hard limit — Kelly criterion handles risk naturally, MIN_BET = $1 (Polymarket minimum)
-  }
+  // Update throttle AFTER all batches complete
+  _lastClaudeCallTime = Date.now();
+  _persistThrottleState();
 
   // ─── Summary ─────────────────────────────────
-  const totalAICost = costTracker.totalCostUsd + aiResult.usage.costUsd;
-  debugLog.betsPlaced = betsThisCycle;
+  const totalAICost = costTracker.totalCostUsd + totalAICostCycle;
+  debugLog.betsPlaced = totalBetsThisCycle;
   debugLog.nextScanSecs = SCAN_INTERVAL_SECS;
 
   log("────────────────────────────────────────────────");
-  log(`📋 RESUMEN: ${betsThisCycle} apuestas / ${aiResult.analyses.length} recomendaciones / ${pool.length} en pool`);
-  log(`💡 ${aiResult.summary}`);
-  log(`💸 Costo: ${formatCost(aiResult.usage.costUsd)} | Total: ${formatCost(totalAICost)}`);
+  log(`📋 RESUMEN: ${totalBetsThisCycle} apuestas / ${totalRecommendations} recomendaciones / ${fullPool.length} en pool (${batches.length} batches)`);
+  log(`💡 ${lastAiResult?.summary || "(no AI result)"}`);
+  log(`💸 Costo ciclo: ${formatCost(totalAICostCycle)} | Total: ${formatCost(totalAICost)}`);
   log(`⏱️ Próximo ciclo en ${SCAN_INTERVAL_SECS}s`);
   log("────────────────────────────────────────────────");
 
-  if (betsThisCycle === 0) {
+  if (totalBetsThisCycle === 0) {
     let reason = "";
-    if (aiResult.analyses.length === 0) reason = `Claude no encontró mispricing en mercados ${expiryLabel}.`;
+    if (totalRecommendations === 0) reason = `Claude no encontró mispricing en ${batches.length} batch(es) (${Math.min(fullPool.length, batches.length * MAX_POOL_FOR_ANALYSIS)} mercados ${expiryLabel}).`;
     else reason = "Kelly rechazó las recomendaciones (edge o monto insuficiente).";
 
     activities.push(activity(
-      `📭 0 apuestas de ${aiResult.analyses.length} recomendaciones. ${reason} Costo: ${formatCost(aiResult.usage.costUsd)}`,
+      `📭 0 apuestas de ${totalRecommendations} recs (${batches.length} batches). ${reason} Costo: ${formatCost(totalAICostCycle)}`,
       "Info"
     ));
   } else {
     activities.push(activity(
-      `✅ ${betsThisCycle} apuestas | Balance: $${updatedPortfolio.balance.toFixed(2)} | IA: ${formatCost(aiResult.usage.costUsd)}`,
+      `✅ ${totalBetsThisCycle} apuestas | Balance: $${updatedPortfolio.balance.toFixed(2)} | IA: ${formatCost(totalAICostCycle)}`,
       "Info"
     ));
   }
@@ -984,9 +1036,9 @@ async function _runSmartCycleInner(
   return {
     portfolio: updatedPortfolio,
     betsPlaced,
-    marketsAnalyzed: aiResult.analyses.length,
-    marketsEligible: pool.length,
-    aiUsage: aiResult.usage,
+    marketsAnalyzed: totalRecommendations,
+    marketsEligible: fullPool.length,
+    aiUsage: lastAiResult?.usage || null,
     nextScanSeconds: SCAN_INTERVAL_SECS,
     activities,
   };

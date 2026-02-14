@@ -189,12 +189,12 @@ THRESHOLDS TO RECOMMEND:
 SPORTS-SPECIFIC:
   If you have bookmaker odds in training data → normalize with vig removal:
     pFair = pRaw / (pTeam1 + pTeam2), then edge = pFair - pMarket.
-  If you do NOT have current bookmaker odds → acknowledge in reasoning, use statistical/historical analysis, cap confidence at 50.
+  If you do NOT have current bookmaker odds → acknowledge in reasoning, use statistical/historical analysis instead.
+    In this case require edge ≥ 0.12 (higher bar to compensate for uncertainty).
 
 CONFIDENCE RULES (single source of truth):
   < 2 dated sources → confidence ≤ 40, don't recommend.
   Can't verify resolution rules → confidence ≤ 40, don't recommend.
-  Sports without bookmaker data → confidence ≤ 50, don't recommend unless edge is exceptionally clear.
   NEVER fabricate sources or data. Honest low confidence > fabricated high confidence.
 
 QUARTER-KELLY SIZING:
