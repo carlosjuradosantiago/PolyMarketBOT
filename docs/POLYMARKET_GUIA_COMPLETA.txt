@@ -1,0 +1,788 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    POLYMARKET - GUÍA COMPLETA DE APIs Y TRADING
+#                         Análisis Técnico Detallado
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. ¿QUÉ ES POLYMARKET?
+# ─────────────────────────────────────────────────────────────────────────────
+
+Polymarket es el mercado de predicciones más grande del mundo. Funciona en la 
+blockchain de Polygon (Chain ID: 137) y usa USDCe (USDC bridgeado) como moneda.
+
+CONCEPTO CLAVE: Compras "shares" (acciones) de resultados futuros.
+- Cada share tiene un precio entre $0.00 y $1.00
+- El precio = la probabilidad que el mercado asigna al evento
+- Si aciertas, cada share vale $1.00.  Si fallas, vale $0.00
+- YES + NO siempre suman ≈ $1.00 (están colateralizados)
+
+EJEMPLO:
+  "¿Bitcoin superará $102K el 12 de febrero?"
+  - YES = $0.35 (el mercado dice 35% de probabilidad)
+  - NO  = $0.65 (el mercado dice 65% de probabilidad)
+  
+  Si compras 100 shares de YES a $0.35 = pagas $35
+  Si Bitcoin SÍ lo supera → recibes $100 (ganancia de $65)
+  Si Bitcoin NO lo supera → pierdes tus $35
+
+DIFERENCIA CON CASAS DE APUESTAS:
+  - NO hay "casa" que apueste contra ti
+  - Tu contraparte es OTRO usuario de Polymarket
+  - Puedes VENDER tus shares en cualquier momento (no estás atrapado)
+  - Nadie te banea por ganar mucho
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. ARQUITECTURA DE APIs DE POLYMARKET
+# ─────────────────────────────────────────────────────────────────────────────
+
+Polymarket ofrece 6 APIs principales + 2 fuentes de datos adicionales:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         APIS DE POLYMARKET                              │
+├─────────────────────┬───────────────────────────────────────────────────┤
+│                     │                                                   │
+│  ① GAMMA API        │  Descubrimiento de mercados y metadata            │
+│  (LECTURA)          │  URL: https://gamma-api.polymarket.com            │
+│  NO requiere auth   │  Para: buscar eventos, categorías, resoluciones   │
+│                     │                                                   │
+├─────────────────────┼───────────────────────────────────────────────────┤
+│                     │                                                   │
+│  ② CLOB API         │  Precios, orderbooks y TRADING                    │
+│  (LECTURA+ESCRITURA)│  URL: https://clob.polymarket.com                 │
+│  Requiere L1/L2 auth│  Para: ver precios, colocar/cancelar órdenes      │
+│                     │  ES LA API PRINCIPAL DE TRADING                    │
+│                     │                                                   │
+├─────────────────────┼───────────────────────────────────────────────────┤
+│                     │                                                   │
+│  ③ DATA API         │  Posiciones, actividad e historial                 │
+│  (LECTURA)          │  URL: https://data-api.polymarket.com             │
+│  Requiere auth      │  Para: ver posiciones, historial de trades         │
+│                     │                                                   │
+├─────────────────────┼───────────────────────────────────────────────────┤
+│                     │                                                   │
+│  ④ WEBSOCKET        │  Actualizaciones en tiempo real                    │
+│  (STREAMING)        │  URL: wss://ws-subscriptions-clob.polymarket.com  │
+│  Requiere auth      │  Para: orderbook live, precios, estado de órdenes │
+│                     │                                                   │
+├─────────────────────┼───────────────────────────────────────────────────┤
+│                     │                                                   │
+│  ⑤ RTDS             │  Stream de datos de baja latencia                  │
+│  (STREAMING)        │  Para: precios crypto en tiempo real, comentarios  │
+│                     │  Optimizado para market makers                     │
+│                     │                                                   │
+├─────────────────────┼───────────────────────────────────────────────────┤
+│                     │                                                   │
+│  ⑥ SUBGRAPH         │  Consultas onchain via GraphQL                     │
+│  (LECTURA)          │  Para: estado blockchain directo                   │
+│                     │                                                   │
+└─────────────────────┴───────────────────────────────────────────────────┘
+
+INFRAESTRUCTURA ADICIONAL:
+  - CTF Operations: Split/Merge/Redeem tokens (gestión de inventario)
+  - Relayer Client: Transacciones sin gas (para builders)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. DETALLE DE CADA API
+# ─────────────────────────────────────────────────────────────────────────────
+
+## ① GAMMA API - Descubrimiento de Mercados
+   URL Base: https://gamma-api.polymarket.com
+   Autenticación: NO REQUIERE (es público y de solo lectura)
+   
+   ¿PARA QUÉ SIRVE?
+   Es tu punto de entrada. Aquí descubres QUÉ mercados existen, sus categorías,
+   volúmenes, y metadata. Sin esto no sabes qué tradear.
+
+   ENDPOINTS PRINCIPALES:
+   
+   GET /events?active=true&closed=false&limit=100
+     → Lista todos los eventos activos (grupos de mercados)
+     → Cada evento puede tener 1+ mercados dentro
+   
+   GET /markets?slug=nombre-del-mercado
+     → Detalle de un mercado específico
+     → Devuelve clobTokenIds (NECESARIOS para tradear)
+   
+   GET /sports
+     → Lista de ligas deportivas soportadas
+   
+   GET /tags?limit=100
+     → Todas las categorías/etiquetas disponibles
+   
+   GET /events?tag_id=2&active=true
+     → Filtrar eventos por categoría
+   
+   GET /events?series_id=10345&active=true
+     → Eventos de una liga deportiva específica
+
+   ESTRUCTURA DE DATOS CLAVE:
+   
+   Event (Evento):
+     - Objeto de nivel superior
+     - Representa una pregunta como "¿Ocurrirá X?"
+     - Contiene 1+ Markets
+   
+   Market (Mercado):
+     - Resultado binario tradeable dentro de un evento
+     - Tiene outcomes: ["Yes", "No"]
+     - Tiene outcomePrices: ["0.20", "0.80"]  (índices 1:1)
+     - Tiene clobTokenIds: son los Token IDs necesarios para CLOB
+     - condition_id: identificador onchain
+   
+   EJEMPLO DE RESPUESTA:
+   {
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0.20\", \"0.80\"]"
+     // Index 0: "Yes" → 0.20 (20% probabilidad)
+     // Index 1: "No"  → 0.80 (80% probabilidad)
+   }
+
+
+## ② CLOB API - Central Limit Order Book (LA API PRINCIPAL)
+   URL Base: https://clob.polymarket.com
+   Autenticación: L1 para crear keys, L2 para trading
+   
+   ¿PARA QUÉ SIRVE?
+   Es el CORAZÓN del trading. Aquí colocas órdenes, cancelas órdenes,
+   ves orderbooks, precios en tiempo real. Todo el trading pasa por aquí.
+
+   El CLOB es un sistema HÍBRIDO-DESCENTRALIZADO:
+   - Matching (emparejamiento de órdenes): OFF-CHAIN (rápido)
+   - Settlement (liquidación): ON-CHAIN (seguro, no-custodial)
+   - Las órdenes son mensajes firmados EIP-712
+
+   ENDPOINTS DE LECTURA (públicos, sin auth):
+   
+   GET /price?token_id=TOKEN_ID&side=buy
+     → Precio actual de un token
+   
+   GET /book?token_id=TOKEN_ID
+     → Orderbook completo (bids y asks)
+   
+   GET /midprice?token_id=TOKEN_ID
+     → Precio medio del token
+   
+   ENDPOINTS DE TRADING (requieren L2 auth):
+   
+   POST /order          → Colocar una orden
+   POST /orders         → Colocar múltiples órdenes (batch)
+   DELETE /order         → Cancelar una orden
+   DELETE /orders        → Cancelar múltiples órdenes
+   DELETE /cancel-all    → Cancelar TODAS las órdenes
+   DELETE /cancel-market-orders → Cancelar órdenes de un mercado
+   
+   GET /orders          → Ver tus órdenes abiertas
+   GET /trades          → Ver tu historial de trades
+
+
+## ③ DATA API - Posiciones y Actividad
+   URL Base: https://data-api.polymarket.com
+   
+   ¿PARA QUÉ SIRVE?
+   Consultar posiciones del usuario, historial de trades, datos de portfolio.
+   Es complementaria al CLOB - aquí consultas tu estado general.
+
+
+## ④ WEBSOCKET - Actualizaciones en Tiempo Real
+   URL: wss://ws-subscriptions-clob.polymarket.com
+   
+   ¿PARA QUÉ SIRVE?
+   Recibir actualizaciones PUSH en tiempo real sin hacer polling.
+   Esencial para bots que necesitan reaccionar al instante.
+
+   DOS CANALES DISPONIBLES:
+   
+   Canal "MARKET": 
+     → Te suscribes con asset_ids (token IDs)
+     → Recibes: cambios en orderbook, actualizaciones de precios
+   
+   Canal "USER":
+     → Te suscribes con markets (condition IDs)
+     → Recibes: estado de tus órdenes, tus trades
+   
+   Para suscribirte envías un mensaje JSON con:
+   {
+     "auth": { ... },          // Credenciales de autenticación
+     "markets": ["cond_id"],   // Para canal USER
+     "assets_ids": ["tok_id"], // Para canal MARKET
+     "type": "MARKET",         // o "USER"
+   }
+
+
+## ⑤ CTF - Conditional Token Framework (Operaciones Onchain)
+   
+   ¿PARA QUÉ SIRVE?
+   Gestión directa de tokens en la blockchain. Los outcome tokens son
+   ERC-1155 en el sistema de Gnosis CTF.
+
+   TRES OPERACIONES FUNDAMENTALES:
+   
+   SPLIT (Dividir):
+     - Convierte USDC → 1 YES token + 1 NO token
+     - 1 USDC → 1 YES + 1 NO (siempre un set completo)
+     - Función: splitPosition() en el contrato CTF
+   
+   MERGE (Fusionar) - El inverso de Split:
+     - Convierte 1 YES token + 1 NO token → 1 USDC
+     - Útil para: cerrar posiciones, gestionar inventario
+     - Función: mergePositions() en el contrato CTF
+   
+   REDEEM (Redimir) - Después de resolución:
+     - Los tokens ganadores se canjean por $1.00 USDC cada uno
+     - Los tokens perdedores valen $0.00
+     - Función: redeemPositions() en el contrato CTF
+     - Solo disponible DESPUÉS de que el mercado se resuelva
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. SISTEMA DE AUTENTICACIÓN (MUY IMPORTANTE)
+# ─────────────────────────────────────────────────────────────────────────────
+
+Polymarket usa DOS NIVELES de autenticación:
+
+## NIVEL L1 - Autenticación con Private Key
+   
+   ¿Qué es?
+   Usa la clave privada de tu wallet para firmar un mensaje EIP-712.
+   Prueba que controlas la wallet. Es NO CUSTODIAL (tú mantienes el control).
+   
+   ¿Para qué se usa?
+   - Crear credenciales API (L2)
+   - Derivar credenciales API existentes
+   - Firmar órdenes localmente
+   
+   Headers HTTP requeridos:
+   ┌────────────────┬─────────────────────────────────┐
+   │ POLY_ADDRESS   │ Tu dirección en Polygon          │
+   │ POLY_SIGNATURE │ Firma EIP-712                    │
+   │ POLY_TIMESTAMP │ Timestamp UNIX actual            │
+   │ POLY_NONCE     │ Nonce (default 0)                │
+   └────────────────┴─────────────────────────────────┘
+   
+   Endpoints L1:
+   POST /auth/api-key        → Crear nuevas credenciales API
+   GET  /auth/derive-api-key → Derivar credenciales existentes
+
+## NIVEL L2 - Autenticación con API Key (HMAC-SHA256)
+   
+   ¿Qué es?
+   Usa las credenciales generadas desde L1 (apiKey, secret, passphrase).
+   Las requests se firman con HMAC-SHA256 usando el secret.
+   
+   ¿Para qué se usa?
+   - Colocar/cancelar órdenes firmadas
+   - Ver tus órdenes abiertas
+   - Consultar balances y allowances
+   - Todo el trading en sí
+   
+   Headers HTTP requeridos:
+   ┌──────────────────┬─────────────────────────────────┐
+   │ POLY_ADDRESS     │ Tu dirección en Polygon          │
+   │ POLY_SIGNATURE   │ Firma HMAC-SHA256                │
+   │ POLY_TIMESTAMP   │ Timestamp UNIX actual            │
+   │ POLY_API_KEY     │ Tu apiKey                        │
+   │ POLY_PASSPHRASE  │ Tu passphrase                    │
+   └──────────────────┴─────────────────────────────────┘
+
+## TIPOS DE FIRMA (Signature Types)
+
+   ┌──────┬────────────────┬─────────────────────────────────────────────┐
+   │ Tipo │ Nombre         │ Descripción                                 │
+   ├──────┼────────────────┼─────────────────────────────────────────────┤
+   │  0   │ EOA            │ Wallet estándar (MetaMask/Privada). Tú      │
+   │      │                │ pagas el gas. Funder = tu wallet address.    │
+   ├──────┼────────────────┼─────────────────────────────────────────────┤
+   │  1   │ POLY_PROXY     │ Login con Magic Link/email/Google.           │
+   │      │                │ Requiere exportar PK de Polymarket.com.      │
+   ├──────┼────────────────┼─────────────────────────────────────────────┤
+   │  2   │ GNOSIS_SAFE    │ Gnosis Safe multisig (más común).            │
+   │      │                │ Para usuarios con wallet conectada.          │
+   └──────┴────────────────┴─────────────────────────────────────────────┘
+
+   IMPORTANTE: Incluso con autenticación L2, colocar órdenes aún requiere
+   que el usuario FIRME el payload de la orden con su clave privada.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. PASOS COMPLETOS PARA GENERAR UNA ORDEN
+# ─────────────────────────────────────────────────────────────────────────────
+
+FLUJO COMPLETO: Desde cero hasta orden ejecutada
+
+PASO 1: INSTALAR SDK
+  ┌──────────────┬────────────────────────────────────────┐
+  │ TypeScript   │ npm install @polymarket/clob-client     │
+  │ Python       │ pip install py-clob-client              │  
+  │ Rust         │ cargo add polymarket-client-sdk         │
+  └──────────────┴────────────────────────────────────────┘
+
+PASO 2: INICIALIZAR CLIENTE CON PRIVATE KEY
+  - HOST = "https://clob.polymarket.com"
+  - CHAIN_ID = 137 (Polygon mainnet)
+  - Crear signer con tu PRIVATE_KEY
+  
+  ```
+  client = ClobClient(HOST, CHAIN_ID, signer)
+  ```
+
+PASO 3: DERIVAR CREDENCIALES API (L1 → L2)
+  - Se usa UNA VEZ tu private key para generar:
+    • apiKey:     "550e8400-e29b-41d4-a716-..."
+    • secret:     "base64EncodedSecretString"
+    • passphrase: "randomPassphraseString"
+  
+  ```
+  apiCreds = client.createOrDeriveApiKey()
+  ```
+  
+  GUARDAR ESTAS CREDENCIALES - Son las que usarás para todo.
+
+PASO 4: REINICIALIZAR CLIENTE CON AUTH COMPLETA
+  ```
+  client = ClobClient(
+    HOST, CHAIN_ID, signer,
+    apiCreds,          // Credenciales L2
+    signatureType,     // 0=EOA, 1=PROXY, 2=GNOSIS
+    funderAddress      // Dirección que tiene los fondos
+  )
+  ```
+
+PASO 5: ENCONTRAR UN MERCADO (Gamma API)
+  ```
+  GET https://gamma-api.polymarket.com/events?active=true&closed=false
+  ```
+  - De la respuesta, obtener el TOKEN_ID (clobTokenIds)
+  - También necesitas: tickSize, negRisk del mercado
+
+PASO 6: VERIFICAR PRECIO ACTUAL
+  ```
+  GET https://clob.polymarket.com/price?token_id=TOKEN_ID&side=buy
+  GET https://clob.polymarket.com/book?token_id=TOKEN_ID
+  ```
+
+PASO 7: CREAR Y COLOCAR LA ORDEN
+  ```
+  response = client.createAndPostOrder(
+    {
+      tokenID: "TOKEN_ID",   // Del Gamma API
+      price: 0.50,           // Precio por share ($0.50)
+      size: 10,              // Cantidad de shares
+      side: Side.BUY,        // BUY o SELL
+    },
+    {
+      tickSize: "0.01",      // Tick mínimo del mercado
+      negRisk: false,        // true para multi-outcome
+    },
+    OrderType.GTC            // Tipo de orden
+  )
+  ```
+  
+  La orden internamente es un objeto complejo firmado EIP-712:
+  ┌─────────────┬──────────────────────────────────────────┐
+  │ salt        │ Random para hacer la orden única          │
+  │ maker       │ Dirección del maker (tu wallet funder)    │
+  │ signer      │ Dirección que firma                       │
+  │ taker       │ Dirección del taker (operador)            │
+  │ tokenId     │ ERC1155 token ID                          │
+  │ makerAmount │ Máximo que el maker pagará                │
+  │ takerAmount │ Mínimo que el taker recibirá              │
+  │ expiration  │ Timestamp UNIX de expiración              │
+  │ nonce       │ Nonce del exchange del maker               │
+  │ feeRateBps  │ Fee en basis points                       │
+  │ side        │ BUY o SELL (índice enum)                  │
+  │ signature   │ Firma hex del maker                       │
+  └─────────────┴──────────────────────────────────────────┘
+
+PASO 8: VERIFICAR ESTADO DE LA ORDEN
+  La respuesta incluye:
+  - success: true/false
+  - orderID: identificador único
+  - status: "matched" | "live" | "delayed" | "unmatched"
+  
+  Estados posibles:
+  ┌────────────┬──────────────────────────────────────────────────┐
+  │ matched    │ Orden colocada y emparejada con una existente     │
+  │ live       │ Orden colocada y descansando en el book           │
+  │ delayed    │ Orden marketable pero sujeta a delay de matching  │
+  │ unmatched  │ Orden marketable, fallo en delay, placement ok    │
+  └────────────┴──────────────────────────────────────────────────┘
+
+PASO 9: MONITOREAR (WebSocket o Polling)
+  ```
+  openOrders = client.getOpenOrders()
+  trades = client.getTrades()
+  ```
+
+PASO 10: CANCELAR SI ES NECESARIO
+  ```
+  client.cancel(order_id="0x38a73eed...")       // Una orden
+  client.cancel_orders(["0x38a...", "0xbb..."])  // Varias
+  client.cancel_all()                            // Todas
+  client.cancel_market_orders(market="0xbd31..", // De un mercado
+                              asset_id="521...")
+  ```
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. TIPOS DE ÓRDENES
+# ─────────────────────────────────────────────────────────────────────────────
+
+┌──────┬─────────────────┬────────────────────────────────────────────────┐
+│ Tipo │ Nombre          │ Comportamiento                                 │
+├──────┼─────────────────┼────────────────────────────────────────────────┤
+│ GTC  │ Good-Til-Cancel │ Permanece abierta hasta que se llena o         │
+│      │                 │ la cancelas manualmente. LA MÁS COMÚN.         │
+├──────┼─────────────────┼────────────────────────────────────────────────┤
+│ GTD  │ Good-Til-Date   │ Permanece abierta hasta una fecha específica   │
+│      │                 │ (timestamp UTC). Si no se llena, se cancela.   │
+│      │                 │ NOTA: Hay umbral de 1min de seguridad.         │
+│      │                 │ Si necesita expirar en 90s → poner now+90s     │
+├──────┼─────────────────┼────────────────────────────────────────────────┤
+│ FOK  │ Fill-Or-Kill    │ ORDEN DE MERCADO. Se ejecuta completa al       │
+│      │                 │ instante o se cancela totalmente. Sin llenados │
+│      │                 │ parciales. Compra en $, vende en shares.       │
+├──────┼─────────────────┼────────────────────────────────────────────────┤
+│ FAK  │ Fill-And-Kill   │ ORDEN DE MERCADO. Se ejecuta lo que pueda      │
+│      │                 │ inmediatamente, el resto se cancela. Sí acepta │
+│      │                 │ llenados parciales.                            │
+└──────┴─────────────────┴────────────────────────────────────────────────┘
+
+POST-ONLY ORDERS:
+  - Opción especial para órdenes GTC y GTD
+  - Si postOnly=true: la orden SOLO descansará en el book
+  - Si cruzaría el spread (es marketable), se RECHAZA
+  - NO se puede combinar con FOK o FAK (se rechaza)
+  - Útil para market makers que solo quieren poner liquidez
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. COMISIONES (FEES) Y COSTOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+## FEES DE TRADING
+   
+   LA GRAN MAYORÍA DE MERCADOS: 0% FEE (¡SIN COMISIONES!)
+   
+   Mercados CON fee (pequeño taker fee):
+   - Mercados crypto de 15 minutos
+   - Mercados NCAAB (baloncesto universitario) - desde Feb 18, 2026
+   - Mercados Serie A (fútbol italiano) - desde Feb 18, 2026
+   
+   Los fees cobrados se redistribuyen diariamente a market makers
+   como rebates (incentivo de liquidez).
+
+## FÓRMULA DE FEES (cuando aplica):
+
+   Al VENDER tokens por USDC:
+     fee = baseRate × min(price, 1-price) × size
+   
+   Al COMPRAR tokens con USDC:
+     fee = baseRate × min(price, 1-price) × size / price
+
+## OTROS COSTOS:
+   - Deposit/Withdraw USDC: GRATIS en Polymarket
+     (intermediarios como Coinbase/MoonPay pueden cobrar)
+   - Gas de Polygon: Muy bajo (~$0.001-$0.01 por transacción)
+     Solo si usas EOA (tipo 0). Proxy wallets tienen relayer gratuito.
+   - API de Claude (para nuestro bot): $3/$15 por M tokens (Sonnet)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. RESOLUCIÓN DE MERCADOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+¿CÓMO SE DETERMINA QUIÉN GANA?
+
+Polymarket usa UMA's Optimistic Oracle (OO) - un oráculo on-chain.
+
+FLUJO DE RESOLUCIÓN:
+
+  1. INITIALIZE (Iniciar resolución)
+     - Cualquiera puede iniciar la resolución
+     - Se almacenan los parámetros de la pregunta en el contrato
+     - Se solicita un "precio" (resultado) al oráculo
+
+  2. PROPOSE PRICE (Proponer resultado)
+     - Cualquiera puede proponer un resultado
+     - DEBE depositar un BOND de $750 USDC
+     - Comienza el período de "liveness" (espera)
+     
+     ⚠️ ADVERTENCIA: Si propones incorrectamente, PIERDES los $750
+
+  3. CHALLENGE PERIOD (Período de disputa) - 2 HORAS
+     - Cualquiera que no esté de acuerdo puede DISPUTAR
+     - Para disputar también debe depositar un counter-bond
+     - Si se disputa → se escala al DVM de UMA
+
+  4. RESOLVE (Resolver)
+     - Si nadie disputa en 2 horas: la propuesta se acepta
+     - El proponente recupera su bond + recibe reward
+     - Los tokens ganadores valen $1, los perdedores $0
+
+  FLUJOS POSIBLES:
+  
+  Flujo normal (sin disputa):
+    Initialize → Propose → [2h espera] → Resolve ✓
+  
+  Con una disputa:
+    Initialize → Propose → Challenge → Propose (2do) → Resolve ✓
+  
+  Con dos disputas (va al DVM):
+    Initialize → Propose → Challenge → Propose → Challenge → DVM Vote → Resolve ✓
+
+  SISTEMA DE DOBLE DISPUTA:
+  Polymarket diseñó un sistema donde se necesitan DOS disputas
+  para llegar al DVM. Esto:
+  - Duplica el costo de un ataque griefing
+  - Permite que una primera propuesta incorrecta no retrase todo
+  - La primera disputa genera una nueva ronda de propuesta
+
+  DESPUÉS DE LA RESOLUCIÓN:
+  - Los holders de tokens ganadores llaman a redeemPositions()
+  - Cada token ganador = $1.00 USDC
+  - Tokens perdedores = $0.00 (no reclaman nada)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. PENALIDADES Y VALIDACIONES
+# ─────────────────────────────────────────────────────────────────────────────
+
+## VALIDACIONES CONTINUAS DE ÓRDENES
+
+   Polymarket monitorea CONSTANTEMENTE tus órdenes para verificar:
+   - Balances suficientes
+   - Allowances correctos
+   - Cancelaciones on-chain
+   
+   ⚠️ BLACKLIST: Si te atrapan ABUSANDO intencionalmente de estas
+   validaciones serás BANEADO permanentemente.
+
+## REGLAS DE BALANCE POR MERCADO
+
+   Solo puedes colocar órdenes que sumen ≤ tu balance disponible
+   POR MERCADO.
+   
+   Ejemplo:
+   - Tienes 500 USDC
+   - Colocas orden: BUY 1000 YES en mercadoA @ $0.50 (reserva $500)
+   - Cualquier orden adicional en mercadoA será RECHAZADA
+   
+   Fórmula:
+   maxOrderSize = balance - Σ(orderSize - orderFillAmount)
+
+## ERRORES DE ÓRDENES (PENALIDADES INMEDIATAS)
+
+   ┌────────────────────────────────┬──────────────────────────────────┐
+   │ Error                         │ Significado                       │
+   ├────────────────────────────────┼──────────────────────────────────┤
+   │ INVALID_ORDER_MIN_TICK_SIZE   │ Precio no respeta el tick mínimo  │
+   │ INVALID_ORDER_MIN_SIZE        │ Tamaño menor al mínimo permitido  │
+   │ INVALID_ORDER_DUPLICATED      │ Orden idéntica ya existe          │
+   │ INVALID_ORDER_NOT_ENOUGH_     │ Balance/allowance insuficiente    │
+   │   BALANCE                     │                                  │
+   │ INVALID_ORDER_EXPIRATION      │ Expiración en el pasado          │
+   │ INVALID_ORDER_ERROR           │ Error del sistema al insertar    │
+   │ INVALID_POST_ONLY_ORDER_TYPE  │ postOnly con FOK/FAK (prohibido) │
+   │ INVALID_POST_ONLY_ORDER       │ postOnly cruzaría el book        │
+   │ EXECUTION_ERROR               │ Error del sistema en ejecución   │
+   │ ORDER_DELAYED                 │ Matching retrasado (condiciones) │
+   │ DELAYING_ORDER_ERROR          │ Error al retrasar la orden       │
+   │ FOK_ORDER_NOT_FILLED_ERROR    │ FOK no se pudo llenar completa   │
+   │ MARKET_NOT_READY              │ Mercado aún no acepta órdenes    │
+   └────────────────────────────────┴──────────────────────────────────┘
+
+## DELAY EN MERCADOS DEPORTIVOS
+   
+   Los mercados deportivos tienen un DELAY de 3 SEGUNDOS en órdenes
+   marketable (para prevenir front-running con información en vivo).
+   
+   Además, cuando un juego COMIENZA, todas las órdenes limit abiertas
+   se CANCELAN automáticamente (se limpia todo el order book).
+
+## RESTRICCIONES GEOGRÁFICAS (GEOBLOCK)
+
+   ⚠️ MUY IMPORTANTE: Polymarket BLOQUEA 33 países completamente.
+   Las órdenes desde regiones bloqueadas son RECHAZADAS.
+   
+   PAÍSES BLOQUEADOS (incluye):
+   - Estados Unidos (US)
+   - Reino Unido (GB)
+   - Francia (FR)
+   - Alemania (DE)
+   - Italia (IT)
+   - Australia (AU)
+   - Rusia (RU)
+   - Cuba (CU)
+   - Irán (IR)
+   - + 24 más
+   
+   REGIONES BLOQUEADAS:
+   - Canadá: Ontario
+   - Ucrania: Crimea, Donetsk, Luhansk
+   
+   Endpoint para verificar:
+   GET https://polymarket.com/api/geoblock
+   → Devuelve: { blocked: bool, ip, country, region }
+   
+   VERIFICAR ANTES DE INTENTAR TRADEAR.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. RATE LIMITS (LÍMITES DE VELOCIDAD)
+# ─────────────────────────────────────────────────────────────────────────────
+
+Polymarket usa Cloudflare para throttling. Si excedes los límites,
+las requests se RETRASAN (no se rechazan inmediatamente).
+
+## LÍMITES GENERALES
+   ┌────────────────────────────┬────────────────────────────────┐
+   │ General                   │ 15,000 requests / 10 segundos   │
+   └────────────────────────────┴────────────────────────────────┘
+
+## GAMMA API
+   ┌────────────────────────────┬────────────────────────────────┐
+   │ General                   │ 4,000 req / 10s                 │
+   │ /events                   │ 500 req / 10s                   │
+   │ /markets                  │ 300 req / 10s                   │
+   │ Search                    │ 350 req / 10s                   │
+   └────────────────────────────┴────────────────────────────────┘
+
+## CLOB API - DATOS DE MERCADO
+   ┌────────────────────────────┬────────────────────────────────┐
+   │ General                   │ 9,000 req / 10s                 │
+   │ /book (orderbook)         │ 1,500 req / 10s                 │
+   │ /price                    │ 1,500 req / 10s                 │
+   │ /midprice                 │ 1,500 req / 10s                 │
+   └────────────────────────────┴────────────────────────────────┘
+
+## CLOB API - TRADING (LOS MÁS IMPORTANTES)
+   ┌────────────────────────────┬────────────────────────────────┐
+   │ POST /order                │ BURST: 500/s, Sostenido: 60/s  │
+   │ DELETE /order              │ BURST: 300/s, Sostenido: 50/s  │
+   │ POST /orders (batch)      │ BURST: 100/s, Sostenido: 25/s  │
+   │ DELETE /orders (batch)    │ BURST: 100/s, Sostenido: 25/s  │
+   │ DELETE /cancel-all        │ BURST: 25/s, Sostenido: 10/s   │
+   └────────────────────────────┴────────────────────────────────┘
+
+## DATA API
+   ┌────────────────────────────┬────────────────────────────────┐
+   │ General                   │ 1,000 req / 10s                 │
+   │ /trades                   │ 200 req / 10s                   │
+   │ /positions                │ 150 req / 10s                   │
+   └────────────────────────────┴────────────────────────────────┘
+
+   PARA NUESTRO BOT: Con un scan cada 60 segundos estamos MUY lejos
+   de los límites. Incluso a 1 scan/segundo estaríamos bien.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. CONCEPTOS CLAVE (GLOSARIO TÉCNICO)
+# ─────────────────────────────────────────────────────────────────────────────
+
+## MERCADOS Y EVENTOS
+   ┌──────────────────┬──────────────────────────────────────────────────┐
+   │ Event            │ Grupo de mercados relacionados                    │
+   │ Market           │ Resultado binario tradeable (YES/NO)              │
+   │ Token            │ Posición en un resultado. Precio: $0.00-$1.00    │
+   │ Token ID         │ Identificador único del token (para API)          │
+   │ Condition ID     │ Identificador onchain de condición de resolución  │
+   │ Question ID      │ ID que conecta mercado con oráculo UMA            │
+   │ Slug             │ URL legible: polymarket.com/event/[slug]          │
+   └──────────────────┴──────────────────────────────────────────────────┘
+
+## TRADING
+   ┌──────────────────┬──────────────────────────────────────────────────┐
+   │ CLOB             │ Central Limit Order Book (libro de órdenes)       │
+   │ Tick Size        │ Incremento mínimo de precio (0.01 o 0.001)        │
+   │ Fill             │ Ejecución de una orden (parcial o total)          │
+   │ Neg Risk         │ Multi-outcome event (solo uno puede ser YES)      │
+   │ Allowance        │ Permiso del contrato Exchange para gastar tokens  │
+   └──────────────────┴──────────────────────────────────────────────────┘
+
+## INFRAESTRUCTURA
+   ┌──────────────────┬──────────────────────────────────────────────────┐
+   │ Polygon          │ Blockchain donde opera Polymarket. Chain 137      │
+   │ USDCe            │ Stablecoin usada como colateral (USDC bridgeado) │
+   │ CTF              │ Conditional Token Framework (contratos de tokens) │
+   │ UMA              │ Oráculo para resolución de mercados               │
+   └──────────────────┴──────────────────────────────────────────────────┘
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. SDKs DISPONIBLES
+# ─────────────────────────────────────────────────────────────────────────────
+
+PARA TRADERS (nuestro caso):
+   ┌──────────────────┬──────────────────────────────────────────────────┐
+   │ TypeScript       │ npm install @polymarket/clob-client               │
+   │                  │ github.com/Polymarket/clob-client                 │
+   ├──────────────────┼──────────────────────────────────────────────────┤
+   │ Python           │ pip install py-clob-client                        │
+   │                  │ github.com/Polymarket/py-clob-client              │
+   ├──────────────────┼──────────────────────────────────────────────────┤
+   │ Rust             │ cargo add polymarket-client-sdk                   │
+   │                  │ github.com/Polymarket/rs-clob-client              │
+   └──────────────────┴──────────────────────────────────────────────────┘
+
+PARA BUILDERS (apps para usuarios):
+   ┌──────────────────┬──────────────────────────────────────────────────┐
+   │ Relayer Client   │ Transacciones sin gas para usuarios               │
+   │ Signing SDK      │ Headers de autenticación para builders            │
+   └──────────────────┴──────────────────────────────────────────────────┘
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 13. SEGURIDAD Y AUDITORÍAS
+# ─────────────────────────────────────────────────────────────────────────────
+
+- El contrato Exchange fue auditado por ChainSecurity
+- El operador SOLO puede hacer matching y garantizar orden correcto
+- El operador NO puede poner precios ni ejecutar trades no autorizados
+- Los usuarios pueden cancelar órdenes on-chain independientemente
+- El código fuente del Exchange está en GitHub (open source)
+- El UmaCtfAdapter también fue auditado
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 14. RESUMEN PARA NUESTRO BOT
+# ─────────────────────────────────────────────────────────────────────────────
+
+PARA IMPLEMENTAR NUESTRO BOT NECESITAMOS:
+
+  1. GAMMA API (sin auth) → Descubrir mercados activos
+  2. CLOB API (con L2 auth) → Trading: precios, órdenes, cancelaciones
+  3. WEBSOCKET → Updates en tiempo real de precios y órdenes
+  4. CLAUDE AI → Analizar mercados y determinar edge
+
+FLUJO DEL BOT:
+  
+  [SCAN] Gamma API → obtener mercados activos
+     ↓
+  [PRICE] CLOB API → obtener precios actuales y orderbook
+     ↓
+  [ANALYZE] Claude AI → determinar probabilidad real y edge
+     ↓
+  [DECIDE] ¿Edge > umbral mínimo? 
+     ↓ SÍ
+  [ORDER] CLOB API → colocar orden (GTC o FOK)
+     ↓
+  [MONITOR] WebSocket → seguir estado de la orden
+     ↓
+  [RESOLVE] Esperar resolución del mercado
+     ↓
+  [REDEEM] CTF → Reclamar ganancias ($1 por token ganador)
+
+COSTOS OPERATIVOS DEL BOT:
+  - Trading fees: $0 en la mayoría de mercados
+  - Gas de Polygon: ~$0.001-$0.01 por transacción
+  - Claude AI: ~$0.002-$0.01 por análisis de mercado
+  - Total estimado: ~$1-$5/día dependiendo de volumen
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FIN DEL DOCUMENTO
+# Fuente: https://docs.polymarket.com
+# Última actualización: Febrero 2026
+# ═══════════════════════════════════════════════════════════════════════════════
