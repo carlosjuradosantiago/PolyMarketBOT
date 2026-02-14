@@ -137,7 +137,7 @@ NOTE: The same market ID may appear twice (YES and NO sides). This is intentiona
 ${blacklist}
 
 ═══ MARKETS TO SCAN (${shortTermMarkets.length} pre-filtered and deduplicated locally) ═══
-Pre-filtered locally: resolved, de-facto resolved (prices ≤2¢ or ≥98¢), junk/social media/tweets, duplicate open positions, low liquidity (<$500), low volume (<$1K).
+Pre-filtered locally: resolved, de-facto resolved (prices ≤2¢ or ≥98¢), junk/social media/tweets, duplicate open positions, low liquidity (<$500), low volume (<$1K), ultra-near expiry (≤5 min).
 Category filters (sports, crypto, stocks) are applied progressively — if the clean pool was small, some sports/crypto/stocks markets MAY be present.
 ALL markets below passed filters and are valid. ANALYZE EVERY ONE without exception.
 
@@ -153,6 +153,11 @@ For EACH market, determine:
   2. dataNeeded: what primary data would resolve this market?
   3. confidence_prelim: 0-100 estimate based on how much relevant data you have
   4. flag: "candidate" (confidence_prelim ≥ 50 AND you have relevant data) | "reject" (no data, junk, extreme price, unresearchable)
+  5. FOR SPORTS ONLY — identify bet type and line:
+     * marketType: "moneyline" | "spread" | "total" | "draw" | "btts" | "prop" | null (non-sports)
+     * line: the exact line number (e.g. 146.5, -13.5) or null for moneyline/non-sports
+     * When comparing with bookmaker odds, you MUST match the SAME line and bet type.
+       E.g. Polymarket O/U 146.5 can only be compared against bookmaker O/U 146.5, NOT O/U 148.
 Put ALL markets (candidates AND rejects) in the "scanned" array in the output.
 
 ──── STEP B — DEEP DIVE (only candidate markets from Step A) ────
@@ -218,8 +223,12 @@ If expiresInMin < 30:
 
 ═══ PROBABILITY + EDGE + DYNAMIC FRICTION ═══
 - Estimate pReal and conservative [pLow, pHigh] range (80% credible).
-- pMarket = YES price as decimal (already provided).
-- edge = pReal - pMarket.
+- CRITICAL — pMarket MUST match the recommended side:
+  * If recommendedSide = YES → pMarket = YES price, pReal = your estimated YES probability.
+  * If recommendedSide = NO  → pMarket = NO price (= 1 - YES price), pReal = 1 - pReal_YES.
+  * edge = pReal_side - pMarket_side. All values (pReal, pLow, pHigh, edge, evNet) must be on the SAME side.
+  * If you estimate pReal_YES but recommend NO, you MUST convert: pReal = 1 - pReal_YES, pMarket = 1 - YES_price.
+  * Failure to do this produces phantom edge.
 - DYNAMIC FRICTION ESTIMATE (do NOT use a fixed percentage):
   * spread_est: if Liq ≥ $50K → 0.5%; $10K-$50K → 1.0%; $2K-$10K → 2.0%; < $2K → 3.5%
   * fee_est: assume 0.5% unless you have specific fee data (fees may vary by program/period — treat 0.5% as default estimate, not a constant)
@@ -266,7 +275,9 @@ If expiresInMin < 30:
       "flag": "candidate|reject",
       "notes": "1-2 lines: analysis notes — why rejected, data gaps, partial findings, or why not recommended",
       "confidence_prelim": 0,
-      "clusterId": "...|null"
+      "clusterId": "...|null",
+      "marketType": "moneyline|spread|total|draw|btts|prop|null",
+      "line": "number|null"
     }
   ],
   "recommendations": [

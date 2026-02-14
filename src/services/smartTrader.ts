@@ -374,6 +374,10 @@ function buildShortTermPool(
     if (m.resolved || !m.active) { bd.resolved++; continue; }
     if (timeLeft > _maxExpiryMs) { bd.tooFarOut++; continue; }
 
+    // ═══ AUTO-REJECT ULTRA NEAR EXPIRY (≤5 min) ═══
+    // These almost always end up rejected and waste Claude tokens
+    if (timeLeft <= 5 * 60 * 1000) { bd.expired++; continue; }
+
     // ═══ HARD LIQUIDITY/VOLUME FILTER ═══
     if (m.liquidity < MIN_LIQUIDITY || m.volume < MIN_VOLUME) {
       bd.lowLiquidity++;
