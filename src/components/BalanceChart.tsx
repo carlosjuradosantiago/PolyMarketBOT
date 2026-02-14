@@ -10,12 +10,14 @@ import {
 } from "recharts";
 import { BalancePoint } from "../types";
 import { formatCurrency } from "../utils/format";
+import { useTranslation } from "../i18n";
 
 interface BalanceChartProps {
   history: BalancePoint[];
 }
 
 export default function BalanceChart({ history }: BalanceChartProps) {
+  const { t } = useTranslation();
   const chartData = useMemo(() => {
     return history.map((point, i) => ({
       ...point,
@@ -55,9 +57,9 @@ export default function BalanceChart({ history }: BalanceChartProps) {
       <div className="flex items-center justify-between px-4 py-2 border-b border-bot-border">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold tracking-wider text-bot-muted uppercase">
-            Balance History
+            {t("chart.balanceHistory")}
           </span>
-          <span className="text-[10px] text-bot-muted">(LOG SCALE)</span>
+          <span className="text-[10px] text-bot-muted">{t("chart.logScale")}</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-bot-muted">48.0H / 48H</span>

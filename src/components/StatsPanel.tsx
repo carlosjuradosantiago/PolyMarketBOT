@@ -1,27 +1,29 @@
 import { BotStats } from "../types";
 import { formatCurrency, formatPnl, formatPercent, formatNumber } from "../utils/format";
+import { useTranslation } from "../i18n";
 
 interface StatsPanelProps {
   stats: BotStats;
 }
 
 export default function StatsPanel({ stats }: StatsPanelProps) {
+  const { t } = useTranslation();
   return (
     <div className="grid grid-cols-2 gap-3 px-4 pb-4">
       {/* Survival Card */}
       <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
         <div className="text-xs font-semibold tracking-wider text-bot-muted uppercase mb-2">
-          Survival
+          {t("stats.survival")}
         </div>
         <div className="grid grid-cols-2 gap-y-1.5 text-xs">
           <StatRow
-            label="Daily API Cost"
+            label={t("stats.dailyAPICost")}
             value={`~${formatCurrency(stats.daily_api_cost)}`}
             color="text-bot-red"
           />
           <StatRow
-            label="Runway"
-            value={`${formatNumber(stats.runway_days)} days`}
+            label={t("stats.runway")}
+            value={t("stats.runwayDays", formatNumber(stats.runway_days))}
             color="text-white"
           >
             {/* Runway bar */}
@@ -40,31 +42,31 @@ export default function StatsPanel({ stats }: StatsPanelProps) {
       {/* Performance Card */}
       <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
         <div className="grid grid-cols-7 gap-3 text-center">
-          <StatCol label="Trades" value={stats.total_trades.toString()} />
+          <StatCol label={t("stats.trades")} value={stats.total_trades.toString()} />
           <StatCol
-            label="Markets Scanned"
+            label={t("stats.marketsScanned")}
             value={formatNumber(stats.markets_scanned)}
           />
           <StatCol
-            label="Avg Bet"
+            label={t("stats.avgBet")}
             value={formatCurrency(stats.avg_bet)}
           />
           <StatCol
-            label="Best Trade"
+            label={t("stats.bestTrade")}
             value={formatPnl(stats.best_trade)}
             color="text-bot-green"
           />
           <StatCol
-            label="Worst Trade"
+            label={t("stats.worstTrade")}
             value={formatPnl(stats.worst_trade)}
             color="text-bot-red"
           />
           <StatCol
-            label="Sharpe"
+            label={t("stats.sharpe")}
             value={stats.sharpe_ratio.toFixed(2)}
           />
           <StatCol
-            label="Avg Edge"
+            label={t("stats.avgEdge")}
             value={formatPercent(stats.avg_edge)}
           />
         </div>

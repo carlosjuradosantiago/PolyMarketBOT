@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { ActivityEntry } from "../types";
 import { getActivityColor } from "../utils/format";
+import { useTranslation } from "../i18n";
 
 interface ActivityLogProps {
   activities: ActivityEntry[];
@@ -8,6 +9,7 @@ interface ActivityLogProps {
 
 export default function ActivityLog({ activities }: ActivityLogProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { t } = useTranslation();
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -21,7 +23,7 @@ export default function ActivityLog({ activities }: ActivityLogProps) {
       {/* Header */}
       <div className="px-4 py-2 border-b border-bot-border flex-shrink-0">
         <span className="text-xs font-semibold tracking-wider text-bot-muted uppercase">
-          Activity Log
+          {t("activity.title")}
         </span>
       </div>
 
@@ -32,7 +34,7 @@ export default function ActivityLog({ activities }: ActivityLogProps) {
       >
         {activities.length === 0 ? (
           <div className="text-bot-muted text-center py-8">
-            Waiting for bot to start...
+            {t("activity.waiting")}
           </div>
         ) : (
           activities.map((entry, idx) => (

@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { Portfolio, PaperOrder } from "../types";
 import { cancelPaperOrder } from "../services/paperTrading";
 import { translateMarketQuestion, translateOutcome } from "../utils/translate";
+import { useTranslation } from "../i18n";
 
 interface OrdersPanelProps {
   portfolio: Portfolio;
@@ -13,50 +14,51 @@ type OrderTab = "active" | "won" | "lost" | "cancelled";
 
 // ─── Helpers ────────────────────────────────────────────────
 
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleString("es-ES", {
+function formatDate(dateStr: string, locale: string) {
+  return new Date(dateStr).toLocaleString(locale === "es" ? "es-ES" : "en-US", {
     day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
   });
 }
 
-function formatDateShort(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("es-ES", {
+function formatDateShort(dateStr: string, locale: string) {
+  return new Date(dateStr).toLocaleDateString(locale === "es" ? "es-ES" : "en-US", {
     day: "2-digit", month: "short", year: "2-digit",
   });
 }
 
-function formatTimeAgo(dateStr: string) {
+function formatTimeAgo(dateStr: string, t: (k: string, ...a: string[]) => string) {
   const diff = Date.now() - new Date(dateStr).getTime();
   const m = Math.floor(diff / 60000);
   const h = Math.floor(m / 60);
   const d = Math.floor(h / 24);
-  if (d > 0) return `hace ${d}d`;
-  if (h > 0) return `hace ${h}h`;
-  if (m > 0) return `hace ${m}m`;
-  return "ahora";
+  if (d > 0) return t("orders.ago.days", String(d));
+  if (h > 0) return t("orders.ago.hours", String(h));
+  if (m > 0) return t("orders.ago.minutes", String(m));
+  return t("orders.ago.now");
 }
 
-function formatTimeRemaining(endDateStr?: string) {
+function formatTimeRemaining(endDateStr?: string, t?: (k: string, ...a: string[]) => string) {
   if (!endDateStr) return null;
+  const _t = t || ((k: string) => k);
   const endMs = new Date(endDateStr).getTime();
   const now = Date.now();
   const diff = endMs - now;
   
   if (diff <= 0) {
-    // Market closed — show how long ago + resolution status
     const agoMs = now - endMs;
     const agoMin = Math.floor(agoMs / 60000);
     const agoH = Math.floor(agoMin / 60);
     const agoD = Math.floor(agoH / 24);
-    const agoStr = agoD > 0 ? `hace ${agoD}d ${agoH % 24}h` : agoH > 0 ? `hace ${agoH}h ${agoMin % 60}m` : `hace ${agoMin}m`;
+    const agoStr = agoD > 0 ? `${agoD}d ${agoH % 24}h` : agoH > 0 ? `${agoH}h ${agoMin % 60}m` : `${agoMin}m`;
     
-    const closedDate = new Date(endDateStr).toLocaleString("es-ES", {
+    const locale = "es-ES";
+    const closedDate = new Date(endDateStr).toLocaleString(locale, {
       day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
     });
     
     return { 
-      text: `Cerrado ${agoStr} — Oráculo pendiente`, 
-      detail: `Cerró: ${closedDate}`,
+      text: _t("orders.closed.oraclePending", agoStr), 
+      detail: _t("orders.closedDate", closedDate),
       expired: true 
     };
   }
@@ -68,42 +70,40 @@ function formatTimeRemaining(endDateStr?: string) {
   const s = totalSecs % 60;
   const timeStr = d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s` : `${m}m ${String(s).padStart(2,'0')}s`;
   
-  return { text: `Cierre apuestas: ${timeStr}`, detail: null, expired: false };
+  return { text: _t("orders.bettingCloses", timeStr), detail: null, expired: false };
 }
 
 /** Estimated resolution: endDate + small buffer. Returns human-readable date + estimate label. */
-function formatResolutionEstimate(endDateStr?: string): { label: string; dateStr: string; isPast: boolean } | null {
+function formatResolutionEstimate(endDateStr?: string, t?: (k: string, ...a: string[]) => string): { label: string; dateStr: string; isPast: boolean } | null {
   if (!endDateStr) return null;
+  const _t = t || ((k: string) => k);
   const endDate = new Date(endDateStr);
   if (isNaN(endDate.getTime())) return null;
   const now = Date.now();
   const endMs = endDate.getTime();
 
-  // Format the endDate as readable date
   const dateFormatted = endDate.toLocaleString("es-ES", {
     day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
   });
 
   if (now > endMs) {
-    // Market already closed — resolution pending from oracle
-    return { label: "Pendiente del oráculo", dateStr: dateFormatted, isPast: true };
+    return { label: _t("orders.pendingOracle"), dateStr: dateFormatted, isPast: true };
   }
 
-  // Estimate: resolution ≈ endDate + 0-48h (oracle confirmation time)
   const diffMs = endMs - now;
   const diffDays = diffMs / 86400000;
 
   let estimate: string;
   if (diffDays < 1) {
-    estimate = "hoy o mañana";
+    estimate = _t("orders.resolveTodayTomorrow");
   } else if (diffDays < 2) {
-    estimate = "en ~1-2 días";
+    estimate = _t("orders.resolveInDays", "1-2");
   } else if (diffDays < 7) {
-    estimate = `en ~${Math.ceil(diffDays)} días`;
+    estimate = _t("orders.resolveInDays", String(Math.ceil(diffDays)));
   } else if (diffDays < 30) {
-    estimate = `en ~${Math.ceil(diffDays / 7)} semanas`;
+    estimate = _t("orders.resolveInWeeks", String(Math.ceil(diffDays / 7)));
   } else {
-    estimate = `en ~${Math.ceil(diffDays / 30)} mes(es)`;
+    estimate = _t("orders.resolveInMonths", String(Math.ceil(diffDays / 30)));
   }
 
   return { label: estimate, dateStr: dateFormatted, isPast: false };
@@ -133,6 +133,7 @@ function getTimeProgress(createdAt: string, endDate?: string): number {
 
 export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }: OrdersPanelProps) {
   const [activeTab, setActiveTab] = useState<OrderTab>("active");
+  const { t } = useTranslation();
 
   // Live tick every 1s so countdowns update in real-time with seconds
   const [, setTick] = useState(0);
@@ -164,7 +165,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
   const handleCancelOrder = (order: PaperOrder) => {
     const updatedPortfolio = cancelPaperOrder(order.id, portfolio);
     onPortfolioUpdate(updatedPortfolio);
-    onActivity(`Orden cancelada: "${order.marketQuestion.slice(0, 40)}..."`, "Warning");
+    onActivity(t("orders.cancelledActivity", order.marketQuestion.slice(0, 40)), "Warning");
   };
 
   // Stats
@@ -181,10 +182,10 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
     : 0;
 
   const tabs: { id: OrderTab; label: string; count: number; icon: string; color: string; activeColor: string }[] = [
-    { id: "active",    label: "Activas",    count: openOrders.length,      icon: "⚡", color: "text-blue-400",   activeColor: "bg-blue-500"    },
-    { id: "won",       label: "Ganadas",    count: wonOrders.length,       icon: "🏆", color: "text-green-400",  activeColor: "bg-green-500"   },
-    { id: "lost",      label: "Perdidas",   count: lostOrders.length,      icon: "💀", color: "text-red-400",    activeColor: "bg-red-500"     },
-    { id: "cancelled", label: "Canceladas", count: cancelledOrders.length, icon: "🚫", color: "text-gray-400",   activeColor: "bg-gray-500"    },
+    { id: "active",    label: t("orders.tabActive"),    count: openOrders.length,      icon: "⚡", color: "text-blue-400",   activeColor: "bg-blue-500"    },
+    { id: "won",       label: t("orders.tabWon"),       count: wonOrders.length,       icon: "🏆", color: "text-green-400",  activeColor: "bg-green-500"   },
+    { id: "lost",      label: t("orders.tabLost"),      count: lostOrders.length,      icon: "💀", color: "text-red-400",    activeColor: "bg-red-500"     },
+    { id: "cancelled", label: t("orders.tabCancelled"), count: cancelledOrders.length, icon: "🚫", color: "text-gray-400",   activeColor: "bg-gray-500"    },
   ];
 
   return (
@@ -194,41 +195,41 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
         <div className="grid grid-cols-6 gap-4">
           {/* Balance en juego */}
           <div className="col-span-1">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">En juego</div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{t("orders.inPlay")}</div>
             <div className="text-2xl font-black text-yellow-400">${totalInvested.toFixed(2)}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{openOrders.length} posiciones</div>
+            <div className="text-xs text-gray-500 mt-0.5">{openOrders.length} {t("orders.positions")}</div>
           </div>
           {/* Pago potencial */}
           <div className="col-span-1">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Pago potencial</div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{t("orders.potentialPayout")}</div>
             <div className="text-2xl font-black text-cyan-400">${totalPendingPayout.toFixed(2)}</div>
             <div className="text-xs text-gray-500 mt-0.5">
-              {totalInvested > 0 ? `+${((totalPendingPayout / totalInvested - 1) * 100).toFixed(0)}% retorno` : "—"}
+              {totalInvested > 0 ? `+${((totalPendingPayout / totalInvested - 1) * 100).toFixed(0)}% ${t("orders.return")}` : "—"}
             </div>
           </div>
           {/* Ganado */}
           <div className="col-span-1">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Ganado</div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{t("orders.won")}</div>
             <div className="text-2xl font-black text-green-400">+${totalWonPnl.toFixed(2)}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{wonOrders.length} trades</div>
+            <div className="text-xs text-gray-500 mt-0.5">{wonOrders.length} {t("orders.trades")}</div>
           </div>
           {/* Perdido */}
           <div className="col-span-1">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Perdido</div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{t("orders.lost")}</div>
             <div className="text-2xl font-black text-red-400">${totalLostPnl.toFixed(2)}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{lostOrders.length} trades</div>
+            <div className="text-xs text-gray-500 mt-0.5">{lostOrders.length} {t("orders.trades")}</div>
           </div>
           {/* P&L Neto */}
           <div className="col-span-1">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">P&L Neto</div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{t("orders.netPnl")}</div>
             <div className={`text-2xl font-black ${netPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
               {netPnl >= 0 ? "+" : ""}${netPnl.toFixed(2)}
             </div>
-            <div className="text-xs text-gray-500 mt-0.5">lifetime</div>
+            <div className="text-xs text-gray-500 mt-0.5">{t("orders.lifetime")}</div>
           </div>
           {/* Win Rate */}
           <div className="col-span-1">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">Win Rate</div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{t("orders.winRate")}</div>
             <div className="text-2xl font-black text-white">{winRate.toFixed(0)}%</div>
             <div className="flex items-center gap-2 mt-1">
               <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
@@ -271,7 +272,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
       {activeTab === "active" && (
         <div>
           {openOrders.length === 0 ? (
-            <EmptyState icon="📭" title="No hay posiciones activas" subtitle="Coloca una apuesta desde la pestaña de Mercados" />
+            <EmptyState icon="📭" title={t("orders.emptyActive")} subtitle={t("orders.emptyActiveHint")} />
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {openOrders.map(order => (
@@ -286,7 +287,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
       {activeTab === "won" && (
         <div>
           {wonOrders.length === 0 ? (
-            <EmptyState icon="🏆" title="Aún sin victorias" subtitle="Tus apuestas ganadoras aparecerán aquí" />
+            <EmptyState icon="🏆" title={t("orders.emptyWon")} subtitle={t("orders.emptyWonHint")} />
           ) : (
             <>
               <WonSummaryBar orders={wonOrders} avgReturn={avgReturn} />
@@ -304,7 +305,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
       {activeTab === "lost" && (
         <div>
           {lostOrders.length === 0 ? (
-            <EmptyState icon="🛡️" title="Sin pérdidas" subtitle="¡Mantén la racha!" />
+            <EmptyState icon="🛡️" title={t("orders.emptyLost")} subtitle={t("orders.emptyLostHint")} />
           ) : (
             <>
               <LostSummaryBar orders={lostOrders} />
@@ -322,7 +323,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
       {activeTab === "cancelled" && (
         <div>
           {cancelledOrders.length === 0 ? (
-            <EmptyState icon="📋" title="Sin cancelaciones" subtitle="Las órdenes que canceles aparecerán aquí" />
+            <EmptyState icon="📋" title={t("orders.emptyCancelled")} subtitle={t("orders.emptyCancelledHint")} />
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {cancelledOrders.map(order => (
@@ -352,6 +353,7 @@ function EmptyState({ icon, title, subtitle }: { icon: string; title: string; su
 
 function ExpandableRawSection({ title, content, color }: { title: string; content?: string; color: "amber" | "teal" }) {
   const [open, setOpen] = useState(false);
+  const { t } = useTranslation();
   if (!content) return null;
 
   const borderColor = color === "amber" ? "border-amber-500/20" : "border-teal-500/20";
@@ -370,7 +372,7 @@ function ExpandableRawSection({ title, content, color }: { title: string; conten
         <span className={`text-[11px] font-bold ${headerText} uppercase tracking-wider flex-1 text-left`}>
           {title}
         </span>
-        <span className="text-[9px] text-gray-500 font-mono">{lineCount} líneas · {charCount} chars</span>
+        <span className="text-[9px] text-gray-500 font-mono">{t("orders.linesChars", String(lineCount), String(charCount))}</span>
         <span className={`text-xs ${headerText} transition-transform ${open ? "rotate-180" : ""}`}>▼</span>
       </button>
       {open && (
@@ -388,9 +390,10 @@ function ExpandableRawSection({ title, content, color }: { title: string; conten
 
 function AIReasoningPanel({ order }: { order: PaperOrder }) {
   const ai = order.aiReasoning;
+  const { t } = useTranslation();
   if (!ai) return (
     <div className="mt-3 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 text-xs text-gray-500 italic">
-      ⚠️ Sin datos de IA — esta orden se colocó antes de activar el modo inteligente o manualmente.
+      {t("orders.noAIData")}
     </div>
   );
 
@@ -408,23 +411,23 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
       <div className="bg-purple-900/20 border border-purple-500/20 rounded-lg p-3">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-sm">🤖</span>
-          <span className="text-[11px] font-bold text-purple-300 uppercase tracking-wider">Análisis Claude AI</span>
+          <span className="text-[11px] font-bold text-purple-300 uppercase tracking-wider">{t("orders.aiAnalysis")}</span>
           <span className="ml-auto text-[10px] text-gray-500 font-mono">{ai.model}</span>
         </div>
 
         {/* Probability comparison */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div className="bg-black/30 rounded-md p-2">
-            <div className="text-[9px] text-gray-500 uppercase font-semibold">P(mercado)</div>
+            <div className="text-[9px] text-gray-500 uppercase font-semibold">{t("orders.pMarket")}</div>
             <div className="text-base font-black text-yellow-400">{pMarketPct}%</div>
           </div>
           <div className="bg-black/30 rounded-md p-2">
-            <div className="text-[9px] text-gray-500 uppercase font-semibold">P(real) IA</div>
+            <div className="text-[9px] text-gray-500 uppercase font-semibold">{t("orders.pRealAI")}</div>
             <div className="text-base font-black text-cyan-400">{pRealPct}%</div>
             <div className="text-[9px] text-gray-600">[{pLowPct}% - {pHighPct}%]</div>
           </div>
           <div className="bg-black/30 rounded-md p-2">
-            <div className="text-[9px] text-gray-500 uppercase font-semibold">Edge</div>
+            <div className="text-[9px] text-gray-500 uppercase font-semibold">{t("orders.edgeLabel")}</div>
             <div className={`text-base font-black ${parseFloat(edgePct) > 0 ? "text-green-400" : "text-red-400"}`}>
               {parseFloat(edgePct) > 0 ? "+" : ""}{edgePct}%
             </div>
@@ -434,9 +437,9 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
         {/* Edge visual bar */}
         <div className="mb-3">
           <div className="flex items-center gap-2 text-[10px] text-gray-500 mb-1">
-            <span>Mercado: {pMarketPct}%</span>
+            <span className="text-[10px] text-gray-500">{t("orders.market")} {pMarketPct}%</span>
             <div className="flex-1" />
-            <span>IA: {pRealPct}%</span>
+            <span className="text-[10px] text-gray-500">{t("orders.ia")} {pRealPct}%</span>
           </div>
           <div className="h-2 bg-gray-800 rounded-full overflow-hidden relative">
             <div className="absolute h-full bg-yellow-500/40 rounded-full" 
@@ -449,7 +452,7 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
         {/* Confidence + Side */}
         <div className="flex items-center gap-3 mb-2">
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-gray-500">Confianza:</span>
+            <span className="text-[10px] text-gray-500">{t("orders.confidenceLabel")}</span>
             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
               ca.confidence >= 70 ? "bg-green-500/20 text-green-400" :
               ca.confidence >= 50 ? "bg-yellow-500/20 text-yellow-400" :
@@ -457,7 +460,7 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
             }`}>{ca.confidence}/100</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-gray-500">Recomendación:</span>
+            <span className="text-[10px] text-gray-500">{t("orders.recommendation")}</span>
             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
               ca.recommendedSide === "YES" ? "bg-green-500/20 text-green-400" :
               ca.recommendedSide === "NO" ? "bg-red-500/20 text-red-400" :
@@ -468,14 +471,14 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
 
         {/* Reasoning */}
         <div className="bg-black/30 rounded-md p-2 mt-2">
-          <div className="text-[9px] text-purple-400/60 uppercase font-bold mb-1">Razonamiento</div>
+          <div className="text-[9px] text-purple-400/60 uppercase font-bold mb-1">{t("orders.reasoningLabel")}</div>
           <div className="text-[11px] text-gray-300 leading-relaxed whitespace-pre-wrap">{ca.reasoning}</div>
         </div>
 
         {/* Risks */}
         {ca.risks && (
           <div className="bg-red-900/10 border border-red-500/15 rounded-md p-2 mt-2">
-            <div className="text-[9px] text-red-400/60 uppercase font-bold mb-1">⚠️ Riesgos</div>
+            <div className="text-[9px] text-red-400/60 uppercase font-bold mb-1">{t("orders.risks")}</div>
             <div className="text-[11px] text-gray-300 leading-relaxed">{ca.risks}</div>
           </div>
         )}
@@ -483,7 +486,7 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
         {/* Resolution Criteria */}
         {ca.resolutionCriteria && (
           <div className="bg-blue-900/10 border border-blue-500/15 rounded-md p-2 mt-2">
-            <div className="text-[9px] text-blue-400/60 uppercase font-bold mb-1">📋 Criterio de Resolución</div>
+            <div className="text-[9px] text-blue-400/60 uppercase font-bold mb-1">{t("orders.resolutionCriteria")}</div>
             <div className="text-[11px] text-gray-300 leading-relaxed">{ca.resolutionCriteria}</div>
           </div>
         )}
@@ -493,7 +496,7 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
           <div className="grid grid-cols-4 gap-2 mt-2">
             {ca.evNet !== undefined && (
               <div className="bg-black/30 rounded-md p-2 text-center">
-                <div className="text-[9px] text-gray-500 uppercase">EV Neto</div>
+                <div className="text-[9px] text-gray-500 uppercase">{t("orders.evNet")}</div>
                 <div className={`text-sm font-bold ${ca.evNet >= 0 ? "text-green-400" : "text-red-400"}`}>
                   {(ca.evNet * 100).toFixed(1)}%
                 </div>
@@ -501,19 +504,19 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
             )}
             {ca.maxEntryPrice !== undefined && (
               <div className="bg-black/30 rounded-md p-2 text-center">
-                <div className="text-[9px] text-gray-500 uppercase">Max Entry</div>
+                <div className="text-[9px] text-gray-500 uppercase">{t("orders.maxEntry")}</div>
                 <div className="text-sm font-bold text-amber-400">{(ca.maxEntryPrice * 100).toFixed(0)}¢</div>
               </div>
             )}
             {ca.sizeUsd !== undefined && (
               <div className="bg-black/30 rounded-md p-2 text-center">
-                <div className="text-[9px] text-gray-500 uppercase">Size IA</div>
+                <div className="text-[9px] text-gray-500 uppercase">{t("orders.sizeAI")}</div>
                 <div className="text-sm font-bold text-purple-400">${ca.sizeUsd.toFixed(2)}</div>
               </div>
             )}
             {ca.orderType && (
               <div className="bg-black/30 rounded-md p-2 text-center">
-                <div className="text-[9px] text-gray-500 uppercase">Orden</div>
+                <div className="text-[9px] text-gray-500 uppercase">{t("orders.orderType")}</div>
                 <div className="text-sm font-bold text-blue-400">{ca.orderType}</div>
               </div>
             )}
@@ -532,43 +535,43 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
       </div>
 
       {/* Full Prompt & Response Expandables */}
-      <ExpandableRawSection title="📤 Prompt enviado a Claude" content={ai.fullPrompt} color="amber" />
-      <ExpandableRawSection title="📥 Respuesta completa de Claude" content={ai.fullResponse} color="teal" />
+      <ExpandableRawSection title={t("orders.promptSent")} content={ai.fullPrompt} color="amber" />
+      <ExpandableRawSection title={t("orders.fullResponse")} content={ai.fullResponse} color="teal" />
 
       {/* Kelly Calculation */}
       <div className="bg-blue-900/20 border border-blue-500/20 rounded-lg p-3">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-sm">📐</span>
-          <span className="text-[11px] font-bold text-blue-300 uppercase tracking-wider">Cálculo Kelly Criterion</span>
+          <span className="text-[11px] font-bold text-blue-300 uppercase tracking-wider">{t("orders.kellyCalc")}</span>
         </div>
 
         <div className="grid grid-cols-5 gap-2">
           <div className="bg-black/30 rounded-md p-2 text-center">
-            <div className="text-[9px] text-gray-500 uppercase">Raw Kelly</div>
+            <div className="text-[9px] text-gray-500 uppercase">{t("orders.rawKelly")}</div>
             <div className="text-sm font-bold text-blue-400">{(k.rawKelly * 100).toFixed(1)}%</div>
           </div>
           <div className="bg-black/30 rounded-md p-2 text-center">
-            <div className="text-[9px] text-gray-500 uppercase">¼ Kelly</div>
+            <div className="text-[9px] text-gray-500 uppercase">{t("orders.quarterKelly")}</div>
             <div className="text-sm font-bold text-purple-400">{(k.fractionalKelly * 100).toFixed(1)}%</div>
           </div>
           <div className="bg-black/30 rounded-md p-2 text-center">
-            <div className="text-[9px] text-gray-500 uppercase">Apuesta</div>
+            <div className="text-[9px] text-gray-500 uppercase">{t("orders.betLabel")}</div>
             <div className="text-sm font-bold text-green-400">${k.betAmount.toFixed(2)}</div>
           </div>
           <div className="bg-black/30 rounded-md p-2 text-center">
-            <div className="text-[9px] text-gray-500 uppercase">EV</div>
+            <div className="text-[9px] text-gray-500 uppercase">{t("orders.evLabel")}</div>
             <div className={`text-sm font-bold ${k.expectedValue >= 0 ? "text-green-400" : "text-red-400"}`}>
               ${k.expectedValue.toFixed(3)}
             </div>
           </div>
           <div className="bg-black/30 rounded-md p-2 text-center">
-            <div className="text-[9px] text-gray-500 uppercase">Costo IA</div>
+            <div className="text-[9px] text-gray-500 uppercase">{t("orders.aiCostLabel")}</div>
             <div className="text-sm font-bold text-yellow-400">${k.aiCostPerBet.toFixed(4)}</div>
           </div>
         </div>
 
         <div className="text-[10px] text-gray-500 mt-2">
-          Costo total IA del ciclo: ${ai.costUsd.toFixed(4)} | {ai.timestamp}
+          {t("orders.cycleCost", ai.costUsd.toFixed(4))} | {ai.timestamp}
         </div>
       </div>
     </div>
@@ -579,11 +582,12 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
 
 function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o: PaperOrder) => void }) {
   const [expanded, setExpanded] = useState(false);
+  const { t, locale } = useTranslation();
   const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sí";
   const probPct = order.price < 0.01 ? (order.price * 100).toFixed(1) : (order.price * 100).toFixed(0);
   const returnPct = ((order.potentialPayout / order.totalCost - 1) * 100).toFixed(0);
-  const timeInfo = formatTimeRemaining(order.endDate);
-  const resolutionInfo = formatResolutionEstimate(order.endDate);
+  const timeInfo = formatTimeRemaining(order.endDate, t);
+  const resolutionInfo = formatResolutionEstimate(order.endDate, t);
   const progress = getTimeProgress(order.createdAt, order.endDate);
   const hasAI = !!order.aiReasoning;
 
@@ -612,11 +616,11 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
                 expanded ? "bg-purple-500/20 text-purple-300 border-purple-500/40" : "bg-purple-500/10 text-purple-400/60 border-purple-500/20"
               }`}>
-                🧠 {expanded ? "Cerrar" : "Ver IA"}
+                🧠 {expanded ? t("orders.closeAI") : t("orders.seeAI")}
               </span>
             )}
             <span className="text-[10px] text-gray-500 whitespace-nowrap mt-0.5">
-              {formatTimeAgo(order.createdAt)}
+              {formatTimeAgo(order.createdAt, t)}
             </span>
           </div>
         </div>
@@ -635,7 +639,7 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
             <span className="font-mono font-bold text-white">{probPct}¢</span>
             <span>×</span>
             <span className="font-mono font-bold text-white">{order.quantity.toFixed(1)}</span>
-            <span>acciones</span>
+            <span>{t("orders.shares")}</span>
           </div>
           {hasAI && (
             <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded font-bold ${
@@ -643,7 +647,7 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
               order.aiReasoning!.claudeAnalysis.confidence >= 50 ? "bg-yellow-500/15 text-yellow-400" :
               "bg-red-500/15 text-red-400"
             }`}>
-              Conf: {order.aiReasoning!.claudeAnalysis.confidence}
+              {t("orders.conf")} {order.aiReasoning!.claudeAnalysis.confidence}
             </span>
           )}
         </div>
@@ -651,15 +655,15 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
         {/* Row 3: Stats bar */}
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-gradient-to-br from-yellow-500/10 to-yellow-600/5 border border-yellow-500/15 rounded-xl px-3 py-2.5">
-            <div className="text-[9px] text-yellow-500/70 uppercase font-bold tracking-wider">Invertido</div>
+            <div className="text-[9px] text-yellow-500/70 uppercase font-bold tracking-wider">{t("orders.invested")}</div>
             <div className="text-base font-black text-yellow-400 mt-0.5">${order.totalCost.toFixed(2)}</div>
           </div>
           <div className="bg-gradient-to-br from-cyan-500/10 to-cyan-600/5 border border-cyan-500/15 rounded-xl px-3 py-2.5">
-            <div className="text-[9px] text-cyan-500/70 uppercase font-bold tracking-wider">Si ganas</div>
+            <div className="text-[9px] text-cyan-500/70 uppercase font-bold tracking-wider">{t("orders.ifWin")}</div>
             <div className="text-base font-black text-cyan-400 mt-0.5">${order.potentialPayout.toFixed(2)}</div>
           </div>
           <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border border-emerald-500/15 rounded-xl px-3 py-2.5">
-            <div className="text-[9px] text-emerald-500/70 uppercase font-bold tracking-wider">Retorno</div>
+            <div className="text-[9px] text-emerald-500/70 uppercase font-bold tracking-wider">{t("orders.returnLabel")}</div>
             <div className="text-base font-black text-emerald-400 mt-0.5">+{returnPct}%</div>
           </div>
         </div>
@@ -669,7 +673,7 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-3">
               <span className="text-[10px] text-gray-600">
-                {formatDate(order.createdAt)}
+                {formatDate(order.createdAt, locale)}
               </span>
               {timeInfo && (
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold
@@ -689,7 +693,7 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
             {!timeInfo?.expired && resolutionInfo && (
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/15">
-                  📋 Resolución estimada: {resolutionInfo.label}
+                  {t("orders.estimatedResolution", resolutionInfo.label)}
                 </span>
                 <span className="text-[9px] text-gray-500">
                   ({resolutionInfo.dateStr})
@@ -704,7 +708,7 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
                      hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/40 
                      transition-all opacity-0 group-hover:opacity-100"
           >
-            Cancelar
+            {t("orders.cancel")}
           </button>
         </div>
 
@@ -720,20 +724,21 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
 function WonSummaryBar({ orders, avgReturn }: { orders: PaperOrder[]; avgReturn: number }) {
   const totalProfit = orders.reduce((s, o) => s + (o.pnl || 0), 0);
   const bestTrade = orders.reduce((best, o) => (o.pnl || 0) > (best.pnl || 0) ? o : best, orders[0]);
+  const { t } = useTranslation();
   return (
     <div className="bg-gradient-to-r from-green-500/10 to-emerald-500/5 border border-green-500/20 rounded-xl px-5 py-3 flex items-center gap-6">
       <div>
-        <div className="text-[10px] text-green-400/60 uppercase font-bold">Ganancias totales</div>
+        <div className="text-[10px] text-green-400/60 uppercase font-bold">{t("orders.totalWinnings")}</div>
         <div className="text-xl font-black text-green-400">+${totalProfit.toFixed(2)}</div>
       </div>
       <div className="w-px h-8 bg-green-500/20" />
       <div>
-        <div className="text-[10px] text-green-400/60 uppercase font-bold">Retorno promedio</div>
+        <div className="text-[10px] text-green-400/60 uppercase font-bold">{t("orders.avgReturn")}</div>
         <div className="text-xl font-black text-green-400">+{avgReturn.toFixed(0)}%</div>
       </div>
       <div className="w-px h-8 bg-green-500/20" />
       <div className="flex-1 min-w-0">
-        <div className="text-[10px] text-green-400/60 uppercase font-bold">Mejor trade</div>
+        <div className="text-[10px] text-green-400/60 uppercase font-bold">{t("orders.bestTrade")}</div>
         <div className="text-sm font-semibold text-white truncate">
           {translateMarketQuestion(bestTrade?.marketQuestion || "").slice(0, 50)}...
           <span className="text-green-400 ml-1">+${(bestTrade?.pnl || 0).toFixed(2)}</span>
@@ -747,6 +752,7 @@ function WonSummaryBar({ orders, avgReturn }: { orders: PaperOrder[]; avgReturn:
 
 function WonOrderCard({ order }: { order: PaperOrder }) {
   const [expanded, setExpanded] = useState(false);
+  const { t, locale } = useTranslation();
   const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sí";
   const pnl = order.pnl || 0;
   const returnPct = ((pnl / order.totalCost) * 100).toFixed(0);
@@ -773,12 +779,11 @@ function WonOrderCard({ order }: { order: PaperOrder }) {
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
                 expanded ? "bg-purple-500/20 text-purple-300 border-purple-500/40" : "bg-purple-500/10 text-purple-400/60 border-purple-500/20"
               }`}>
-                🧠 {expanded ? "Cerrar" : "Ver IA"}
+                🧠 {expanded ? t("orders.closeAI") : t("orders.seeAI")}
               </span>
             )}
             <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-500/15 border border-green-500/25">
-              <span className="text-sm">🏆</span>
-              <span className="text-[10px] font-black text-green-400 uppercase tracking-wide">Ganada</span>
+              <span className="text-[10px] font-black text-green-400 uppercase tracking-wide">{t("orders.wonLabel")}</span>
             </div>
           </div>
         </div>
@@ -794,20 +799,20 @@ function WonOrderCard({ order }: { order: PaperOrder }) {
           </div>
           <div className="text-right">
             <div className="text-lg font-black text-green-400">+${pnl.toFixed(2)}</div>
-            <div className="text-[10px] text-green-400/60 font-semibold">+{returnPct}% retorno</div>
+            <div className="text-[10px] text-green-400/60 font-semibold">{t("orders.returnPct", returnPct)}</div>
           </div>
         </div>
 
         {/* Details row */}
         <div className="flex items-center justify-between pt-2 border-t border-white/5 text-[11px]">
           <div className="flex items-center gap-3 text-gray-500">
-            <span>Costo: <span className="text-gray-300 font-medium">${order.totalCost.toFixed(2)}</span></span>
+            <span>{t("orders.cost")} <span className="text-gray-300 font-medium">${order.totalCost.toFixed(2)}</span></span>
             <span>→</span>
-            <span>Pago: <span className="text-green-400 font-medium">${order.potentialPayout.toFixed(2)}</span></span>
+            <span>{t("orders.payout")} <span className="text-green-400 font-medium">${order.potentialPayout.toFixed(2)}</span></span>
           </div>
           <div className="flex items-center gap-3 text-gray-500">
             <span>⏱ {holdTime}</span>
-            <span>{formatDateShort(order.resolvedAt || order.createdAt)}</span>
+            <span>{formatDateShort(order.resolvedAt || order.createdAt, locale)}</span>
           </div>
         </div>
 
@@ -824,20 +829,21 @@ function LostSummaryBar({ orders }: { orders: PaperOrder[] }) {
   const totalLoss = orders.reduce((s, o) => s + (o.pnl || 0), 0);
   const avgLoss = orders.length > 0 ? totalLoss / orders.length : 0;
   const worstTrade = orders.reduce((worst, o) => (o.pnl || 0) < (worst.pnl || 0) ? o : worst, orders[0]);
+  const { t } = useTranslation();
   return (
     <div className="bg-gradient-to-r from-red-500/10 to-orange-500/5 border border-red-500/20 rounded-xl px-5 py-3 flex items-center gap-6">
       <div>
-        <div className="text-[10px] text-red-400/60 uppercase font-bold">Pérdidas totales</div>
+        <div className="text-[10px] text-red-400/60 uppercase font-bold">{t("orders.totalLosses")}</div>
         <div className="text-xl font-black text-red-400">${totalLoss.toFixed(2)}</div>
       </div>
       <div className="w-px h-8 bg-red-500/20" />
       <div>
-        <div className="text-[10px] text-red-400/60 uppercase font-bold">Pérdida promedio</div>
+        <div className="text-[10px] text-red-400/60 uppercase font-bold">{t("orders.avgLoss")}</div>
         <div className="text-xl font-black text-red-400">${avgLoss.toFixed(2)}</div>
       </div>
       <div className="w-px h-8 bg-red-500/20" />
       <div className="flex-1 min-w-0">
-        <div className="text-[10px] text-red-400/60 uppercase font-bold">Peor trade</div>
+        <div className="text-[10px] text-red-400/60 uppercase font-bold">{t("orders.worstTrade")}</div>
         <div className="text-sm font-semibold text-white truncate">
           {translateMarketQuestion(worstTrade?.marketQuestion || "").slice(0, 50)}...
           <span className="text-red-400 ml-1">${(worstTrade?.pnl || 0).toFixed(2)}</span>
@@ -851,6 +857,7 @@ function LostSummaryBar({ orders }: { orders: PaperOrder[] }) {
 
 function LostOrderCard({ order }: { order: PaperOrder }) {
   const [expanded, setExpanded] = useState(false);
+  const { t, locale } = useTranslation();
   const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sí";
   const pnl = order.pnl || 0;
   const holdTime = order.resolvedAt ? formatDuration(order.createdAt, order.resolvedAt) : "—";
@@ -876,12 +883,12 @@ function LostOrderCard({ order }: { order: PaperOrder }) {
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
                 expanded ? "bg-purple-500/20 text-purple-300 border-purple-500/40" : "bg-purple-500/10 text-purple-400/60 border-purple-500/20"
               }`}>
-                🧠 {expanded ? "Cerrar" : "Ver IA"}
+                🧠 {expanded ? t("orders.closeAI") : t("orders.seeAI")}
               </span>
             )}
             <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500/15 border border-red-500/25">
               <span className="text-sm">💀</span>
-              <span className="text-[10px] font-black text-red-400 uppercase tracking-wide">Perdida</span>
+              <span className="text-[10px] font-black text-red-400 uppercase tracking-wide">{t("orders.lostLabel")}</span>
             </div>
           </div>
         </div>
@@ -897,20 +904,20 @@ function LostOrderCard({ order }: { order: PaperOrder }) {
           </div>
           <div className="text-right">
             <div className="text-lg font-black text-red-400">${pnl.toFixed(2)}</div>
-            <div className="text-[10px] text-red-400/60 font-semibold">-100% perdido</div>
+            <div className="text-[10px] text-red-400/60 font-semibold">{t("orders.lostPct")}</div>
           </div>
         </div>
 
         {/* Details row */}
         <div className="flex items-center justify-between pt-2 border-t border-white/5 text-[11px]">
           <div className="flex items-center gap-3 text-gray-500">
-            <span>Invertido: <span className="text-gray-300 font-medium">${order.totalCost.toFixed(2)}</span></span>
+            <span>{t("orders.investedLabel")} <span className="text-gray-300 font-medium">${order.totalCost.toFixed(2)}</span></span>
             <span>→</span>
-            <span>Recuperado: <span className="text-red-400/80 font-medium">$0.00</span></span>
+            <span>{t("orders.recovered")} <span className="text-red-400/80 font-medium">$0.00</span></span>
           </div>
           <div className="flex items-center gap-3 text-gray-500">
             <span>⏱ {holdTime}</span>
-            <span>{formatDateShort(order.resolvedAt || order.createdAt)}</span>
+            <span>{formatDateShort(order.resolvedAt || order.createdAt, locale)}</span>
           </div>
         </div>
 
@@ -925,6 +932,7 @@ function LostOrderCard({ order }: { order: PaperOrder }) {
 
 function CancelledOrderCard({ order }: { order: PaperOrder }) {
   const [expanded, setExpanded] = useState(false);
+  const { t, locale } = useTranslation();
   const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sí";
   const hasAI = !!order.aiReasoning;
 
@@ -945,11 +953,11 @@ function CancelledOrderCard({ order }: { order: PaperOrder }) {
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
                 expanded ? "bg-purple-500/20 text-purple-300 border-purple-500/40" : "bg-purple-500/10 text-purple-400/60 border-purple-500/20"
               }`}>
-                🧠 {expanded ? "Cerrar" : "Ver IA"}
+                🧠 {expanded ? t("orders.closeAI") : t("orders.seeAI")}
               </span>
             )}
             <span className="text-[10px] font-bold text-gray-500 bg-gray-500/10 px-2 py-0.5 rounded border border-gray-500/20">
-              🚫 CANCELADA
+              {t("orders.cancelledLabel")}
             </span>
           </div>
         </div>
@@ -959,9 +967,9 @@ function CancelledOrderCard({ order }: { order: PaperOrder }) {
               ${isYes ? "bg-green-500/10 text-green-500/50" : "bg-red-500/10 text-red-500/50"}`}>
               {order.outcome} @ {(order.price * 100).toFixed(0)}¢
             </span>
-            <span>${order.totalCost.toFixed(2)} reembolsado</span>
+            <span>{t("orders.refunded", order.totalCost.toFixed(2))}</span>
           </div>
-          <span>{formatDate(order.resolvedAt || order.createdAt)}</span>
+          <span>{formatDate(order.resolvedAt || order.createdAt, locale)}</span>
         </div>
 
         {/* Expandable AI Reasoning */}
