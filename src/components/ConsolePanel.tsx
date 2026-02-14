@@ -109,20 +109,29 @@ export default function ConsolePanel({ isAnalyzing, countdown, lastCycleCost, ai
           </div>
 
           {/* Cycle Selector */}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-1">
             <span className="text-[10px] text-gray-500">Ciclo:</span>
-            <select
-              value={selectedLog}
-              onChange={(e) => setSelectedLog(Number(e.target.value))}
-              className="bg-black/50 border border-gray-700 rounded px-2 py-1 text-xs text-white"
-            >
-              {logs.length === 0 && <option value={0}>Sin ciclos aún</option>}
-              {logs.map((l, i) => (
-                <option key={i} value={i}>
-                  #{logs.length - i} — {new Date(l.timestamp).toLocaleTimeString()} — ${l.costUsd.toFixed(4)}
-                </option>
-              ))}
-            </select>
+            <button
+              onClick={() => setSelectedLog(Math.min(selectedLog + 1, logs.length - 1))}
+              disabled={selectedLog >= logs.length - 1}
+              className="bg-black/50 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Ciclo anterior"
+            >◀</button>
+            <span className="bg-black/50 border border-gray-700 rounded px-2 py-0.5 text-xs text-white font-mono min-w-[60px] text-center">
+              #{logs.length - selectedLog}/{logs.length}
+            </span>
+            <button
+              onClick={() => setSelectedLog(Math.max(selectedLog - 1, 0))}
+              disabled={selectedLog <= 0}
+              className="bg-black/50 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Ciclo siguiente"
+            >▶</button>
+            <button
+              onClick={() => setSelectedLog(0)}
+              disabled={selectedLog === 0}
+              className="bg-black/50 border border-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-400 hover:text-bot-green disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Ir al último ciclo"
+            >⟫</button>
           </div>
         </div>
       </div>
