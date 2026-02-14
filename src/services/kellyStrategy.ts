@@ -22,9 +22,10 @@ const KELLY_FRACTION = 0.25;          // Quarter-Kelly for safety
 const MAX_BET_FRACTION = 0.10;        // Never more than 10% of bankroll
 const MIN_BET_USD = 1.00;             // Polymarket platform minimum order size ($1 USDC)
 const MIN_EDGE_AFTER_COSTS = 0.06;    // 6% minimum net edge (after AI costs, before 8% gross)
-const MIN_CONFIDENCE = 40;            // Skip below this confidence
+const MIN_CONFIDENCE = 60;            // Skip below this confidence (matches prompt threshold)
 const MIN_MARKET_PRICE = 0.02;        // Skip outcomes under 2¢ (lottery tickets — prompt tells AI to avoid <3¢)
 const MAX_MARKET_PRICE = 0.98;        // Skip outcomes over 98¢ (no upside)
+const MIN_RETURN_PCT = 0.03;          // Skip if expected return < 3% (avoids 0% return bets)
 const DEFAULT_SCAN_SECS = 600;        // 10 minutes
 const MIN_SCAN_SECS = 300;            // 5 minutes minimum
 const MAX_SCAN_SECS = 900;            // 15 minutes maximum
@@ -171,6 +172,15 @@ export function calculateKellyBet(
     skipResult.edge = grossEdge;
     skipResult.rawKelly = rawKelly;
     skipResult.reasoning = `Net edge ${(netEdge * 100).toFixed(1)}% < minimum ${(MIN_EDGE_AFTER_COSTS * 100).toFixed(1)}% after AI costs`;
+    return skipResult;
+  }
+
+  // Check minimum return % — reject near-100¢ bets with negligible profit
+  const expectedReturnPct = (1 - pMarket) / pMarket; // profit per dollar if correct
+  if (expectedReturnPct < MIN_RETURN_PCT) {
+    skipResult.edge = grossEdge;
+    skipResult.rawKelly = rawKelly;
+    skipResult.reasoning = `Expected return ${(expectedReturnPct * 100).toFixed(1)}% < minimum ${(MIN_RETURN_PCT * 100).toFixed(0)}% (price too close to $1)`;
     return skipResult;
   }
 
