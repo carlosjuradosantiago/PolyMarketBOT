@@ -3,12 +3,6 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]",
-  "crons": [
-    {
-      "path": "/api/resolve",
-      "schedule": "0 0 * * *"
-    }
-  ],
   "rewrites": [
     {
       "source": "/api/gamma/:path*",

@@ -28,3 +28,5 @@ _archive_server/
 *.bak2
 *.bak3
 data/
+.vercel
+.env*.local
