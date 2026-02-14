@@ -288,6 +288,14 @@ export interface MarketAnalysis {
   clusterId?: string | null; // Cluster of mutually exclusive markets
   risks?: string;           // Risk assessment
   resolutionCriteria?: string; // How the market resolves
+  // Extended fields from improved prompt
+  category?: string;        // Market category (politics, weather, sports, etc.)
+  friction?: number;        // Dynamic friction estimate (spread + fee + slippage)
+  expiresInMin?: number;    // Minutes until market expiry
+  liqUsd?: number;          // Market liquidity in USD
+  volUsd?: number;          // Market volume in USD
+  dataFreshnessScore?: number; // 0-100 how fresh/reliable the data is
+  executionNotes?: string;  // Spread/depth/timing notes
 }
 
 /** Token usage and cost tracking for a single AI call */
