@@ -51,7 +51,7 @@ if (localStorage.getItem("clob_creds_version") !== CREDS_VERSION) {
 type ViewMode = "dashboard" | "markets" | "orders" | "ai" | "console";
 
 function App() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   // Core state
   const [portfolio, setPortfolio] = useState<Portfolio>(defaultPortfolio);
   const [stats, setStats] = useState<BotStats>(defaultStats);
@@ -332,8 +332,12 @@ function App() {
       .catch(e => console.error("[App] DB activity save failed:", e));
   }, [addActivity]);
 
-  // Reset portfolio
+  // Reset portfolio — with confirmation dialog
   const handleReset = useCallback(() => {
+    const confirmMsg = locale === "es"
+      ? "⚠️ ATENCIÓN: Esto borrará TODAS las órdenes, actividades, logs de ciclos y costos IA de la base de datos.\n\nEsta acción es IRREVERSIBLE.\n\n¿Estás seguro?"
+      : "⚠️ WARNING: This will DELETE ALL orders, activities, cycle logs, and AI costs from the database.\n\nThis action is IRREVERSIBLE.\n\nAre you sure?";
+    if (!window.confirm(confirmMsg)) return;
     const bal = config.initial_balance || 100;
     const newPortfolio = resetPortfolio(bal);
     setPortfolio(newPortfolio);
@@ -348,7 +352,7 @@ function App() {
     setMarketsEligible(0);
     setMarketsAnalyzed(0);
     addActivity(t("app.portfolioReset", bal.toFixed(2)), "Info");
-  }, [addActivity, updateStatsFromPortfolio, config.initial_balance]);
+  }, [addActivity, updateStatsFromPortfolio, config.initial_balance, locale]);
 
   // Keep refs always pointing to latest values
   useEffect(() => { tradingCycleRef.current = runTradingCycle; }, [runTradingCycle]);
