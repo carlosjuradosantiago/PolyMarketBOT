@@ -2,6 +2,7 @@
 // The private key lives server-side only (never exposed to browser)
 
 import { ethers } from "ethers";
+import crypto from "crypto";
 
 const POLYGON_RPCS = [
   "https://polygon-bor-rpc.publicnode.com",
@@ -9,6 +10,24 @@ const POLYGON_RPCS = [
   "https://1rpc.io/matic",
 ];
 const USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+const CLOB_BASE = "https://clob.polymarket.com";
+const CHAIN_ID = 137;
+
+// EIP-712 domain for Polymarket CLOB L1 auth
+const AUTH_DOMAIN = {
+  name: "ClobAuthDomain",
+  version: "1",
+  chainId: CHAIN_ID,
+};
+
+const AUTH_TYPES = {
+  ClobAuth: [
+    { name: "address", type: "address" },
+    { name: "timestamp", type: "string" },
+    { name: "nonce", type: "uint256" },
+    { name: "message", type: "string" },
+  ],
+};
 
 async function fetchBalance(address) {
   for (const rpcUrl of POLYGON_RPCS) {
@@ -33,6 +52,159 @@ async function fetchBalance(address) {
   return null;
 }
 
+// ─── CLOB L1 Auth (EIP-712 signature) ───────────
+
+async function createL1Headers(wallet) {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const value = {
+    address: wallet.address,
+    timestamp,
+    nonce: 0,
+    message: "This message attests that I control the given wallet",
+  };
+  const signature = await wallet.signTypedData(AUTH_DOMAIN, AUTH_TYPES, value);
+  return {
+    POLY_ADDRESS: wallet.address,
+    POLY_SIGNATURE: signature,
+    POLY_TIMESTAMP: timestamp,
+    POLY_NONCE: "0",
+  };
+}
+
+// ─── CLOB L2 Auth (HMAC-SHA256) ─────────────────
+
+function b64Decode(str) {
+  const sanitized = str.replace(/-/g, "+").replace(/_/g, "/");
+  return Buffer.from(sanitized, "base64");
+}
+
+function b64Encode(buffer) {
+  return Buffer.from(buffer)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+function createL2Headers(apiCreds, address, method, requestPath) {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const message = timestamp + method + requestPath;
+
+  const secretBytes = b64Decode(apiCreds.secret);
+  const hmac = crypto.createHmac("sha256", secretBytes);
+  hmac.update(message);
+  const signature = b64Encode(hmac.digest());
+
+  return {
+    POLY_ADDRESS: address,
+    POLY_SIGNATURE: signature,
+    POLY_TIMESTAMP: timestamp,
+    POLY_API_KEY: apiCreds.apiKey,
+    POLY_PASSPHRASE: apiCreds.passphrase,
+  };
+}
+
+// ─── Derive or Create API Credentials ───────────
+
+let _cachedCreds = null;
+
+async function getApiCredentials(wallet) {
+  if (_cachedCreds) return _cachedCreds;
+
+  try {
+    // 1. Try derive existing credentials
+    const deriveHeaders = await createL1Headers(wallet);
+    const deriveResp = await fetch(`${CLOB_BASE}/auth/derive-api-key`, {
+      method: "GET",
+      headers: deriveHeaders,
+    });
+
+    if (deriveResp.ok) {
+      const data = await deriveResp.json();
+      const creds = extractCreds(data);
+      if (creds) {
+        _cachedCreds = creds;
+        return creds;
+      }
+    }
+
+    // 2. Try create new credentials
+    const createHeaders = await createL1Headers(wallet);
+    const createResp = await fetch(`${CLOB_BASE}/auth/api-key`, {
+      method: "POST",
+      headers: {
+        ...createHeaders,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+
+    if (createResp.ok) {
+      const data = await createResp.json();
+      const creds = extractCreds(data);
+      if (creds) {
+        _cachedCreds = creds;
+        return creds;
+      }
+    }
+
+    console.error("[Wallet API] Could not derive or create CLOB API credentials");
+    return null;
+  } catch (error) {
+    console.error("[Wallet API] CLOB auth error:", error.message);
+    return null;
+  }
+}
+
+function extractCreds(data) {
+  const creds = {
+    apiKey: String(data.apiKey || data.key || data.api_key || ""),
+    secret: String(data.secret || data.api_secret || ""),
+    passphrase: String(data.passphrase || data.api_passphrase || ""),
+  };
+  if (creds.apiKey.length > 10 && creds.secret.length > 10 && creds.passphrase.length > 3) {
+    return creds;
+  }
+  return null;
+}
+
+// ─── Fetch Polymarket CLOB Balance ──────────────
+
+async function fetchPolymarketBalance(wallet, apiCreds) {
+  // Try all signature types, return highest balance
+  let best = null;
+
+  for (const sigType of [0, 1, 2]) {
+    try {
+      const endpoint = "/balance-allowance";
+      const queryString = `?asset_type=COLLATERAL&signature_type=${sigType}`;
+
+      const headers = createL2Headers(apiCreds, wallet.address, "GET", endpoint);
+
+      const response = await fetch(`${CLOB_BASE}${endpoint}${queryString}`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      const rawBalance = String(data.balance ?? data.collateral ?? "0");
+      const balNum = parseFloat(rawBalance);
+      const collateral = balNum > 1_000_000 ? balNum / 1e6 : balNum;
+
+      if (!best || collateral > best) {
+        best = collateral;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return best;
+}
+
+// ─── Main Handler ───────────────────────────────
+
 export default async function handler(req, res) {
   const privateKey = process.env.WALLET_PRIVATE_KEY;
   if (!privateKey) {
@@ -49,12 +221,25 @@ export default async function handler(req, res) {
     const wallet = new ethers.Wallet(key);
     const address = wallet.address;
 
-    const balance = await fetchBalance(address);
+    // Fetch on-chain balance and Polymarket CLOB balance in parallel
+    const [balance, pmBalance] = await Promise.all([
+      fetchBalance(address),
+      (async () => {
+        try {
+          const apiCreds = await getApiCredentials(wallet);
+          if (!apiCreds) return null;
+          return await fetchPolymarketBalance(wallet, apiCreds);
+        } catch (err) {
+          console.error("[Wallet API] Polymarket balance error:", err.message);
+          return null;
+        }
+      })(),
+    ]);
 
     return res.status(200).json({
       address,
       balance,
-      polymarketBalance: null, // CLOB auth requires complex signing, skip for now
+      polymarketBalance: pmBalance,
       isValid: true,
     });
   } catch (err) {

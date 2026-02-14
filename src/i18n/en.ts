@@ -36,6 +36,7 @@ const en: { [K in keyof typeof es]: string } = {
   "card.notConnected": "Not connected",
   "card.initial": "Initial",
   "card.inPlay": "in play",
+  "card.cash": "Available",
   "card.equity": "Equity",
   "card.roi": "ROI",
   "card.realized": "Realized",
@@ -262,6 +263,11 @@ const en: { [K in keyof typeof es]: string } = {
   "console.prevCycle": "Previous cycle",
   "console.nextCycle": "Next cycle",
   "console.lastCycle": "Go to last cycle",
+  "console.view_all": "All",
+  "console.view_day": "Day",
+  "console.view_month": "Month",
+  "console.view_year": "Year",
+  "console.cyclesInPeriod": "cycles",
   "console.tabSummary": "📊 Summary",
   "console.tabMatching": "🔗 Matching",
   "console.tabPool": "⏱️ Pool ≤1h",
@@ -384,6 +390,8 @@ const en: { [K in keyof typeof es]: string } = {
   // ─── Balance Chart ────────────────────────────────
   "chart.balanceHistory": "Balance History",
   "chart.logScale": "(LOG SCALE)",
+  "chart.equity": "EQUITY",
+  "chart.initial": "Initial",
 
   // ─── Activity Log ─────────────────────────────────
   "activity.title": "Activity Log",

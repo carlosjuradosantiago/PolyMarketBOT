@@ -3,10 +3,12 @@
  * Shows: prompt sent, raw response, match results, Kelly calcs, short-term pool, costs
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getCycleLogs, hydrateCycleLogs, CycleDebugLog, RecommendationResult } from "../services/smartTrader";
 import type { AICostTracker } from "../types";
 import { useTranslation } from "../i18n";
+
+type ViewMode = "all" | "day" | "month" | "year";
 
 interface ConsolePanelProps {
   isAnalyzing: boolean;
@@ -17,21 +19,96 @@ interface ConsolePanelProps {
 
 export default function ConsolePanel({ isAnalyzing, countdown, lastCycleCost, aiCostTracker }: ConsolePanelProps) {
   const [logs, setLogs] = useState<CycleDebugLog[]>([]);
-  const [selectedLog, setSelectedLog] = useState<number>(0);
+  const [selectedIdx, setSelectedIdx] = useState<number>(0);  // index into filteredLogs
   const [activeSection, setActiveSection] = useState<string>("overview");
+  const [viewMode, setViewMode] = useState<ViewMode>("all");
+  const [viewDate, setViewDate] = useState<Date>(new Date());
   const tracker = aiCostTracker;
   const { t } = useTranslation();
 
   useEffect(() => {
     const refresh = () => setLogs([...getCycleLogs()]);
-    // Hydrate from Supabase on first mount, then poll in-memory
     hydrateCycleLogs().then(refresh).catch(() => {});
     refresh();
     const interval = setInterval(refresh, 2000);
     return () => clearInterval(interval);
   }, []);
 
-  const currentLog = logs[selectedLog] || null;
+  // Filter logs by view mode + date
+  const filteredLogs = useMemo(() => {
+    if (viewMode === "all") return logs;
+    return logs.filter(log => {
+      const d = new Date(log.timestamp);
+      if (viewMode === "day") {
+        return d.getFullYear() === viewDate.getFullYear() &&
+               d.getMonth() === viewDate.getMonth() &&
+               d.getDate() === viewDate.getDate();
+      }
+      if (viewMode === "month") {
+        return d.getFullYear() === viewDate.getFullYear() &&
+               d.getMonth() === viewDate.getMonth();
+      }
+      // year
+      return d.getFullYear() === viewDate.getFullYear();
+    });
+  }, [logs, viewMode, viewDate]);
+
+  // Reset selection when filter changes
+  useEffect(() => { setSelectedIdx(0); }, [viewMode, viewDate]);
+
+  // Auto-follow latest cycle when at idx 0 (latest) and new cycles come in
+  useEffect(() => {
+    if (filteredLogs.length > 0 && selectedIdx >= filteredLogs.length) {
+      setSelectedIdx(0);
+    }
+  }, [filteredLogs.length, selectedIdx]);
+
+  const currentLog = filteredLogs[selectedIdx] || null;
+
+  // Navigate viewDate
+  const shiftDate = (dir: -1 | 1) => {
+    setViewDate(prev => {
+      const d = new Date(prev);
+      if (viewMode === "day") d.setDate(d.getDate() + dir);
+      else if (viewMode === "month") d.setMonth(d.getMonth() + dir);
+      else if (viewMode === "year") d.setFullYear(d.getFullYear() + dir);
+      return d;
+    });
+  };
+
+  const formatViewDate = () => {
+    const dd = String(viewDate.getDate()).padStart(2, "0");
+    const mm = String(viewDate.getMonth() + 1).padStart(2, "0");
+    const yyyy = viewDate.getFullYear();
+    if (viewMode === "day") return `${dd}/${mm}/${yyyy}`;
+    if (viewMode === "month") return `${mm}/${yyyy}`;
+    return `${yyyy}`;
+  };
+
+  const handleViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    // When switching to a date-filtered mode, default to current cycle's date or today
+    if (mode !== "all" && currentLog) {
+      setViewDate(new Date(currentLog.timestamp));
+    } else {
+      setViewDate(new Date());
+    }
+  };
+
+  // Format cycle timestamp for display
+  const formatCycleTime = (ts: string) => {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  };
+
+  const formatCycleDate = (ts: string) => {
+    const d = new Date(ts);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}`;
+  };
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -110,30 +187,75 @@ export default function ConsolePanel({ isAnalyzing, countdown, lastCycleCost, ai
             </div>
           </div>
 
-          {/* Cycle Selector */}
-          <div className="ml-auto flex items-center gap-1">
-            <span className="text-[10px] text-gray-500">{t("console.cycleLabel")}</span>
-            <button
-              onClick={() => setSelectedLog(Math.min(selectedLog + 1, logs.length - 1))}
-              disabled={selectedLog >= logs.length - 1}
-              className="bg-black/50 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-              title={t("console.prevCycle")}
-            >◀</button>
-            <span className="bg-black/50 border border-gray-700 rounded px-2 py-0.5 text-xs text-white font-mono min-w-[60px] text-center">
-              #{logs.length - selectedLog}/{logs.length}
-            </span>
-            <button
-              onClick={() => setSelectedLog(Math.max(selectedLog - 1, 0))}
-              disabled={selectedLog <= 0}
-              className="bg-black/50 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-              title={t("console.nextCycle")}
-            >▶</button>
-            <button
-              onClick={() => setSelectedLog(0)}
-              disabled={selectedLog === 0}
-              className="bg-black/50 border border-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-400 hover:text-bot-green disabled:opacity-30 disabled:cursor-not-allowed"
-              title={t("console.lastCycle")}
-            >⟫</button>
+          {/* Cycle Selector — Enhanced */}
+          <div className="ml-auto flex flex-col items-end gap-1">
+            {/* View mode buttons */}
+            <div className="flex items-center gap-0.5">
+              {(["all", "day", "month", "year"] as ViewMode[]).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => handleViewMode(mode)}
+                  className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded transition-all ${
+                    viewMode === mode
+                      ? "bg-bot-green text-black"
+                      : "text-gray-500 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  {t(`console.view_${mode}`)}
+                </button>
+              ))}
+            </div>
+
+            {/* Date navigator (only when not "all") */}
+            {viewMode !== "all" && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => shiftDate(-1)}
+                  className="bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-400 hover:text-white"
+                >◀</button>
+                <span className="bg-black/50 border border-gray-700 rounded px-2 py-0.5 text-[10px] text-cyan-400 font-mono min-w-[70px] text-center">
+                  {formatViewDate()}
+                </span>
+                <button
+                  onClick={() => shiftDate(1)}
+                  className="bg-black/50 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-400 hover:text-white"
+                >▶</button>
+                <span className="text-[9px] text-gray-600 ml-1">
+                  ({filteredLogs.length} {t("console.cyclesInPeriod")})
+                </span>
+              </div>
+            )}
+
+            {/* Cycle navigator */}
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-gray-500">{t("console.cycleLabel")}</span>
+              <button
+                onClick={() => setSelectedIdx(Math.min(selectedIdx + 1, filteredLogs.length - 1))}
+                disabled={selectedIdx >= filteredLogs.length - 1}
+                className="bg-black/50 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                title={t("console.prevCycle")}
+              >◀</button>
+              <span className="bg-black/50 border border-gray-700 rounded px-2 py-0.5 text-xs text-white font-mono min-w-[110px] text-center">
+                #{filteredLogs.length - selectedIdx}/{filteredLogs.length}
+                {currentLog && (
+                  <span className="text-gray-500 ml-1 text-[10px]">
+                    {formatCycleDate(currentLog.timestamp)} {formatCycleTime(currentLog.timestamp)}
+                  </span>
+                )}
+              </span>
+              <button
+                onClick={() => setSelectedIdx(Math.max(selectedIdx - 1, 0))}
+                disabled={selectedIdx <= 0}
+                className="bg-black/50 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                title={t("console.nextCycle")}
+              >▶</button>
+              <button
+                onClick={() => setSelectedIdx(0)}
+                disabled={selectedIdx === 0}
+                className="bg-black/50 border border-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-400 hover:text-bot-green disabled:opacity-30 disabled:cursor-not-allowed"
+                title={t("console.lastCycle")}
+              >⟫</button>
+            </div>
           </div>
         </div>
       </div>
