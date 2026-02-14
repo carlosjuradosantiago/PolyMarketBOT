@@ -87,19 +87,28 @@ export function calculateTokenCost(inputTokens: number, outputTokens: number, mo
 
 // ─── OSINT Prompt with Short-Term Markets ──────────────
 
+export interface PerformanceHistory {
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  totalPnl: number;
+  winRate: number;
+}
+
 function buildOSINTPrompt(
   shortTermMarkets: PolymarketMarket[],
   openOrders: PaperOrder[],
   bankroll: number,
+  history?: PerformanceHistory,
 ): string {
   const now = new Date();
 
-  // Blacklist: markets we already have positions in (send as IDs to exclude)
+  // Blacklist: markets we already have positions in
   const blacklist = openOrders.length > 0
     ? openOrders.map(o => `  - [ID:${o.marketId}] "${o.marketQuestion.slice(0, 60)}" → ${o.outcome} @ ${(o.price * 100).toFixed(0)}¢`).join("\n")
     : "  (none)";
 
-  // Build compact market list — each market ~40-60 tokens
+  // Compact market list
   const liqStr = (liq: number) => liq >= 1_000 ? `$${(liq / 1_000).toFixed(0)}K` : `$${liq.toFixed(0)}`;
   const marketLines = shortTermMarkets.map((m, i) => {
     const prices = m.outcomePrices.map(p => parseFloat(p));
@@ -112,179 +121,118 @@ function buildOSINTPrompt(
     return `[${i + 1}] "${m.question}" | YES=${(prices[0] * 100).toFixed(0)}¢ NO=${(prices[1] * 100).toFixed(0)}¢ | Vol=${volStr} | Liq=${liqStr(m.liquidity)} | Expires: ${hoursLeft}h (${minLeft}min) | ID:${m.id}`;
   }).join("\n");
 
-  return `You are a QUANTITATIVE INEFFICIENCY SCANNER for prediction markets (Polymarket).
-Your function: analyze ${shortTermMarkets.length} active markets comparing market prices against real probabilities based on PRIMARY DATA.
-You act as a radar detecting MISPRICING: when publicly available information (weather data, polls, economic indicators, official statements, statistical data) has not yet been fully reflected in prices.
+  // Performance history line (calibration feedback)
+  const historyLine = history && history.totalTrades > 0
+    ? `HISTORY: ${history.totalTrades} resolved trades | W ${history.wins} / L ${history.losses} | Win rate: ${history.winRate.toFixed(0)}% | PnL: $${history.totalPnl.toFixed(2)}\n  → ${history.winRate >= 55 ? "Calibration OK — maintain discipline." : history.winRate >= 45 ? "Marginal — tighten confidence thresholds, require stronger edge." : "Poor — be MORE conservative, raise minimum confidence to 70, minimum edge to 0.12."}`
+    : "HISTORY: No resolved trades yet — be conservative, require strong evidence.";
 
-INFORMATIONAL EDGE CATEGORIES — data the average market participant is slow to process:
-- Politics/Government: polls (RCP, 538, Quinnipiac), scheduled votes, official statements, legislative history, committee calendars
-- Economy/Finance: leading indicators, Bloomberg/Reuters consensus, publication calendars (BLS, BEA, Fed), macro data
-- Events/Regulation: court decisions, regulatory deadlines, agency calendars (FDA, FCC, SEC)
-- Weather: NWS/NOAA data, historical averages, GFS/ECMWF models, seasonality
-- Geopolitics: scheduled summits, elections, treaties, UN resolutions
-- Technology/Science: scheduled launches, data publications, conferences, patents
-- Sports/Esports: bookmaker lines (Pinnacle, Betfair, DraftKings), injury reports, team stats, head-to-head records
-- DIVERSIFY your recommendations: don't focus on a single category (e.g. only temperature). Look for edge across MULTIPLE topics.
+  return `You are a QUANTITATIVE MISPRICING SCANNER for Polymarket.
+Detect when public information (polls, weather data, indicators, odds, official data) is NOT yet reflected in prices.
 
-DATE/TIME (UTC): ${now.toISOString()}
-MODE: SCANNER
-BANKROLL: $${bankroll.toFixed(2)}
-RISK: medium-low (preserve capital > maximize return)
-BOT MODE: RESPOND ONLY WITH VALID JSON. ZERO TEXT OUTSIDE JSON.
+UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | RISK: medium-low (preserve capital > maximize return)
+${historyLine}
 
-═══ BLACKLIST — ALREADY HAVE POSITION (FORBIDDEN to analyze/recommend) ═══
-NOTE: The same market ID may appear twice (YES and NO sides). This is intentional — both sides of an open position are blacklisted.
+═══ DATA SOURCES BY CATEGORY ═══
+Politics: RCP/538/Quinnipiac polls, congress.gov, official statements, legislative calendars
+Economy: BLS/BEA/Fed data, Bloomberg/Reuters consensus, macro indicators
+Weather: NWS/NOAA/Weather.gov, GFS/ECMWF models, historical averages, seasonality
+Sports: bookmaker lines (if available in your training data), injury reports, team stats, H2H records
+Events/Regulation: court decisions, FDA/FCC/SEC calendars, scheduled deadlines
+Geopolitics: summits, elections, treaties, UN resolutions
+Tech/Science: launches, publications, conferences
+→ DIVERSIFY recommendations across categories. Don't cluster in a single topic.
+
+═══ BLACKLIST (FORBIDDEN — already have position) ═══
 ${blacklist}
 
-═══ MARKETS TO SCAN (${shortTermMarkets.length} pre-filtered and deduplicated locally) ═══
-Pre-filtered locally: resolved, de-facto resolved (prices ≤2¢ or ≥98¢), junk/social media/tweets, duplicate open positions, low liquidity (<$500), low volume (<$1K), ultra-near expiry (≤5 min).
-Category filters (sports, crypto, stocks) are applied progressively — if the clean pool was small, some sports/crypto/stocks markets MAY be present.
-ALL markets below passed filters and are valid. ANALYZE EVERY ONE without exception.
-
+═══ MARKETS (${shortTermMarkets.length} pre-filtered, all valid — analyze every one) ═══
 ${marketLines}
 
-══════════════════════════════════════════════════════════════
-               2-STEP ANALYSIS FLOW
-══════════════════════════════════════════════════════════════
+═══ 3-STEP FLOW: SCAN → RESEARCH → SIZE ═══
 
-──── STEP A — QUICK SCAN (all ${shortTermMarkets.length} markets) ────
-For EACH market, determine:
-  1. category: politics | economy | weather | sports | esports | crypto | entertainment | science | geopolitics | other
-  2. dataNeeded: what primary data would resolve this market?
-  3. confidence_prelim: 0-100 estimate based on how much relevant data you have
-  4. flag: "candidate" (confidence_prelim ≥ 50 AND you have relevant data) | "reject" (no data, junk, extreme price, unresearchable)
-  5. FOR SPORTS ONLY — identify bet type and line:
-     * marketType: "moneyline" | "spread" | "total" | "draw" | "btts" | "prop" | null (non-sports)
-     * line: the exact line number (e.g. 146.5, -13.5) or null for moneyline/non-sports
-     * When comparing with bookmaker odds, you MUST match the SAME line and bet type.
-       E.g. Polymarket O/U 146.5 can only be compared against bookmaker O/U 146.5, NOT O/U 148.
-Put ALL markets (candidates AND rejects) in the "scanned" array in the output.
+─── STEP 1: SCAN (all ${shortTermMarkets.length} markets) ───
+For EACH market assign:
+  category | confidence_prelim (0-100) | flag: "candidate" (≥50 + you have data) or "reject"
+  Sports only: marketType (moneyline|spread|total|draw|btts|prop), line (exact number or null).
+  Sports lines must match exactly (e.g. O/U 146.5 vs O/U 146.5, NOT vs 148).
+→ ALL markets go into "scanned" array.
 
-──── STEP B — DEEP DIVE (only candidate markets from Step A) ────
-For the top 3-5 candidates (highest confidence_prelim):
-  1. Full source research: find ≥2 concrete, dated data points per market
-  2. Probability estimation: pReal, pLow, pHigh (80% credible interval)
-  3. Edge and friction calculation (see below)
-  4. Sizing via Kelly criterion (capped)
-  5. If all thresholds are met → move to "recommendations" array
+─── STEP 2: RESEARCH (top 3-5 candidates) ───
+For each candidate:
+  1. Verify resolution rules (official source, definition, timezone). Can't verify → confidence ≤ 40, don't recommend.
+  2. Find ≥2 concrete dated data points. Use primary sources from your knowledge. Cite with dates (YYYY-MM-DD).
+  3. Detect clusterId (mutually exclusive markets). Max 1 recommendation per cluster.
+  4. Estimate pReal + [pLow, pHigh] (80% credible interval).
 
-═══ CATEGORY-SPECIFIC RULES ═══
-SPORTS / ESPORTS markets:
-  - REQUIRE bookmaker odds as primary sources (Pinnacle, Betfair, DraftKings, FanDuel, or equivalent).
-  - If you have NO bookmaker odds data for a sports market → confidence MUST be ≤ 30 and do NOT recommend.
-  - VIG REMOVAL: bookmaker lines include a margin (vig). Before comparing, normalize:
-      pImplied_fair = pImplied_raw / (pImplied_team1 + pImplied_team2).
-      Only compare the vig-free fair probability against pMarket. Without this step you may see phantom edge.
-  - Edge = pImplied_fair - pMarket (after vig removal).
-  - Include injury reports, recent form, head-to-head records as supporting (not primary) evidence.
+─── STEP 3: SIZE + DECIDE ───
+See EDGE, FRICTION, and KELLY rules below. If all thresholds met → "recommendations" array.
 
-ALL OTHER CATEGORIES:
-  - Use primary data sources as listed in INFORMATIONAL EDGE CATEGORIES above.
-  - If you genuinely have relevant knowledge → use it. Cite sources with dates.
-  - If after honest research you have < 2 datable sources → confidence MUST be ≤ 40 and do NOT recommend.
+═══ CORE RULES ═══
 
-═══ ANTI-HALLUCINATION RULES ═══
-- Every recommendation MUST have ≥ 2 items in "sources", each with a date (YYYY-MM-DD or "as of YYYY-MM").
-- If you cannot produce ≥ 2 dated sources for a market → confidence ≤ 40 and it MUST NOT appear in "recommendations".
-- NEVER fabricate sources, URLs, or data points. If you're uncertain about a fact, say so in reasoning and lower confidence.
-- The market's expiry time does NOT limit your analysis capability. Analyze with what you know NOW.
-- But do NOT claim certainty you don't have. Honest low confidence is better than fabricated high confidence.
+SIDE-AWARE MATH (critical — prevents phantom edge):
+  If recommendedSide=YES → pMarket=YES_price, pReal=your YES estimate.
+  If recommendedSide=NO  → pMarket=1-YES_price, pReal=1-pReal_YES.
+  edge = pReal - pMarket. All values (pReal, pLow, pHigh, edge, evNet) on the SAME side.
 
-═══ NEAR-EXPIRY PENALTY ═══
-If expiresInMin < 30:
-  - Add +2% to friction (spread widens near expiry, harder to exit).
-  - Reduce confidence by 10 points (less time for price convergence).
-  - ONLY recommend if edge ≥ 0.15 (nearly double the normal threshold). Otherwise → reject.
-  - executionNotes MUST mention the near-expiry risk.
+DYNAMIC FRICTION (by liquidity tier):
+  spread_est:   Liq≥$50K→0.5% | $10-50K→1.0% | $2-10K→2.0% | <$2K→3.5%
+  fee_est:      default 0.5% (may vary)
+  slippage_est: Liq≥$50K→0.2% | $10-50K→0.5% | <$10K→1.0%
+  Near-expiry (<30min): +2% friction, -10 confidence, require edge≥0.15. Note risk in executionNotes.
+  friction = spread + fee + slippage + near_expiry_penalty
+  evNet = edge - friction (must be > 0)
 
-═══ STEP 0 — MANDATORY ANALYSIS (for EACH candidate market from Step A) ═══
-1. Identify the market's resolution rules (official source, definition, timezone).
-   If you CANNOT verify the resolution source or official rules → confidence MUST be ≤ 40 and do NOT recommend.
-2. ACTIVELY RESEARCH: search your knowledge for concrete data, recent facts, trends, historical context.
-   - For weather/temperature: use weather data, historical averages, seasonal patterns, known forecasts.
-   - For politics: use polls, official statements, legislative history, current political context.
-   - For economy: use indicators, analyst consensus, data trends, economic calendar.
-   - For sports: use bookmaker odds, injury reports, team form, head-to-head records.
-   - For any topic: USE EVERYTHING YOU KNOW — but only what you actually know.
-3. If after genuinely researching you have insufficient data → assign low confidence (20-40), include in "scanned" with detailed analysis of what you tried and what's missing. Do NOT recommend.
-4. Executability: heavily penalize low liquidity, wide spread, very near expiry.
-5. Detect clusterId (mutually exclusive markets: up/down/unchanged; buckets; ranges). Max 1 recommendation per cluster.
+THRESHOLDS TO RECOMMEND:
+  edge ≥ 0.08 AND confidence ≥ 60 AND evNet > 0
+  Price must be 3¢-97¢ (prefer 15¢-85¢ range). Outside → reject.
 
-═══ PRIMARY DATA SCANNING ═══
-- TOP PRIORITY: data from primary sources that the average market is slow to process:
-  * Weather: NWS, NOAA, Weather.gov, historical averages, numerical models
-  * Government/Politics: congress.gov, whitehouse.gov, federal registers, RCP/538 polls
-  * Economy: BLS, BEA, Fed, Treasury, consensus estimates
-  * Sports: Pinnacle/Betfair lines, official league injury reports, team statistics
-  * Events: official organizer sources, historical event data
-- If you have primary data that contradicts the price → that is INFORMATIONAL EDGE.
-- Cite specific sources with dates. The more primary the source, the more reliable the edge.
-- Use historical averages, trends, seasonality as a base when no specific data point exists.
+SPORTS-SPECIFIC:
+  If you have bookmaker odds in training data → normalize with vig removal:
+    pFair = pRaw / (pTeam1 + pTeam2), then edge = pFair - pMarket.
+  If you do NOT have current bookmaker odds → acknowledge in reasoning, use statistical/historical analysis, cap confidence at 50.
 
-═══ PROBABILITY + EDGE + DYNAMIC FRICTION ═══
-- Estimate pReal and conservative [pLow, pHigh] range (80% credible).
-- CRITICAL — pMarket MUST match the recommended side:
-  * If recommendedSide = YES → pMarket = YES price, pReal = your estimated YES probability.
-  * If recommendedSide = NO  → pMarket = NO price (= 1 - YES price), pReal = 1 - pReal_YES.
-  * edge = pReal_side - pMarket_side. All values (pReal, pLow, pHigh, edge, evNet) must be on the SAME side.
-  * If you estimate pReal_YES but recommend NO, you MUST convert: pReal = 1 - pReal_YES, pMarket = 1 - YES_price.
-  * Failure to do this produces phantom edge.
-- DYNAMIC FRICTION ESTIMATE (do NOT use a fixed percentage):
-  * spread_est: if Liq ≥ $50K → 0.5%; $10K-$50K → 1.0%; $2K-$10K → 2.0%; < $2K → 3.5%
-  * fee_est: assume 0.5% unless you have specific fee data (fees may vary by program/period — treat 0.5% as default estimate, not a constant)
-  * slippage_est: if Liq ≥ $50K → 0.2%; $10K-$50K → 0.5%; < $10K → 1.0%
-  * near_expiry_penalty: if expiresInMin < 30 → add +2.0% (see NEAR-EXPIRY PENALTY section)
-  * friction = spread_est + fee_est + slippage_est + near_expiry_penalty
-  * evNet = edge - friction (must be > 0 to recommend)
-- Recommend ONLY if abs(edge) >= 0.08 AND confidence >= 60 AND evNet > 0.
-- A deviation of 8%+ indicates the market has NOT incorporated available information → that's what we're looking for.
+CONFIDENCE RULES (single source of truth):
+  < 2 dated sources → confidence ≤ 40, don't recommend.
+  Can't verify resolution rules → confidence ≤ 40, don't recommend.
+  Sports without bookmaker data → confidence ≤ 50, don't recommend unless edge is exceptionally clear.
+  NEVER fabricate sources or data. Honest low confidence > fabricated high confidence.
 
-═══ SIZING + EXECUTION (FRACTIONAL KELLY) ═══
-- SIZING METHOD: Quarter-Kelly (¼ Kelly). This is critical — prediction market probability estimates have calibration error.
-  Full Kelly is too aggressive; ¼ Kelly balances growth with drawdown protection.
-  * kellyFraction = (pReal * b - q) / b   where b = (1/price - 1), q = 1 - pReal
-  * sizeUsd = kellyFraction * 0.25 * bankroll   (the 0.25 is the ¼ Kelly multiplier)
-  * Hard cap: sizeUsd ≤ 10% bankroll (≤ $${(bankroll * 0.1).toFixed(2)}) regardless of Kelly output.
-  * If kellyFraction ≤ 0 → do NOT recommend (negative edge after friction).
-- orderType="LIMIT" always.
-- maxEntryPrice must ensure that, even after execution, abs(edge) >= 0.05 remains.
-- Max 1 recommendation per clusterId.
-- DIVERSIFICATION: prefer thematic variety. Avoid concentrating more than 2 recommendations in the same category.
-- If primary data contradicts the current price → there's mispricing → RECOMMEND.
-- No artificial total limit: recommend ALL that meet the criteria. If nothing qualifies → empty arrays.
+QUARTER-KELLY SIZING:
+  kellyFraction = (pReal × b - q) / b   where b = (1/price - 1), q = 1 - pReal
+  sizeUsd = kellyFraction × 0.25 × bankroll
+  Hard cap: sizeUsd ≤ 10% bankroll (≤ $${(bankroll * 0.1).toFixed(2)})
+  MINIMUM: sizeUsd < $2 → do NOT recommend (friction eats edge at sub-$2 sizes).
+  kellyFraction ≤ 0 → do NOT recommend.
+  maxEntryPrice must preserve edge ≥ 0.05 after execution.
+  Max 1 per cluster. Prefer thematic diversity (≤ 2 per category).
+  Recommend ALL that meet criteria. If none qualify → empty arrays.
 
-═══ CRITICAL RULE — EXECUTABLE PRICE RANGE ═══
-- FORBIDDEN to recommend markets where the recommended side price is < 3¢ (0.03) or > 97¢ (0.97).
-  Prices <3¢ are lottery tickets with enormous spreads — Kelly rejects them automatically.
-  Prices >97¢ don't have enough upside to justify the capital.
-- Look for opportunities in the 5¢-95¢ range where there's real liquidity and executable edge.
-- If a market has YES=0¢ or YES=100¢, it's probably de-facto resolved — do NOT recommend.
-- Prioritize markets with prices between 15¢-85¢ where mispricing is more likely and executable.
-
-═══ JSON FORMAT (ONLY ALLOWED FORMAT — no backticks, no markdown, no text outside) ═══
+═══ OUTPUT FORMAT ═══
+Respond with JSON inside a code fence. Example:
+\`\`\`json
 {
   "asOfUtc": "${now.toISOString()}",
   "mode": "SCANNER",
   "bankroll": ${bankroll.toFixed(2)},
-  "summary": "2-3 lines: real opportunities (if any), and why most were discarded",
+  "summary": "2-3 lines: opportunities found (if any) and why most were discarded",
   "scanned": [
     {
       "marketId": "ID",
       "question": "...",
-      "category": "politics|economy|weather|sports|esports|crypto|entertainment|science|geopolitics|other",
+      "category": "politics|economy|weather|sports|...|other",
       "flag": "candidate|reject",
-      "notes": "1-2 lines: analysis notes — why rejected, data gaps, partial findings, or why not recommended",
+      "notes": "1-2 lines: why rejected or analysis notes",
       "confidence_prelim": 0,
       "clusterId": "...|null",
-      "marketType": "moneyline|spread|total|draw|btts|prop|null",
-      "line": "number|null"
+      "marketType": "moneyline|spread|total|...|null",
+      "line": null
     }
   ],
   "recommendations": [
     {
-      "marketId": "EXACT ID from the ID:xxx field",
+      "marketId": "exact ID from ID:xxx",
       "question": "exact market question",
-      "category": "politics|economy|weather|sports|esports|crypto|entertainment|science|geopolitics|other",
+      "category": "...",
       "clusterId": "...|null",
       "pMarket": 0.00,
       "pReal": 0.00,
@@ -298,18 +246,19 @@ If expiresInMin < 30:
       "maxEntryPrice": 0.00,
       "sizeUsd": 0.00,
       "orderType": "LIMIT",
-      "reasoning": "5-8 lines with dates + rules + logic + counter-evidence + assumptions",
-      "sources": ["Source - YYYY-MM-DD - title/description", "Source2 - YYYY-MM-DD - ..."],
-      "risks": "2-3 lines (rule/timing/slippage)",
-      "resolutionCriteria": "1 line per verified rules",
+      "reasoning": "5-8 lines with dates + logic + counter-evidence",
+      "sources": ["Source - YYYY-MM-DD - description"],
+      "risks": "2-3 lines",
+      "resolutionCriteria": "verified resolution rules",
       "expiresInMin": 0,
       "liqUsd": 0,
       "volUsd": 0,
       "dataFreshnessScore": 0,
-      "executionNotes": "spread/depth/timing notes"
+      "executionNotes": "spread/depth/timing"
     }
   ]
-}`;
+}
+\`\`\``;
 }
 
 // ─── Types ────────────────────────────────────────────
@@ -330,6 +279,7 @@ export async function analyzeMarketsWithClaude(
   openOrders: PaperOrder[],
   bankroll: number,
   model?: string,
+  history?: PerformanceHistory,
 ): Promise<ClaudeResearchResult> {
   const modelId = model || "claude-sonnet-4-20250514";
 
@@ -342,7 +292,7 @@ export async function analyzeMarketsWithClaude(
     };
   }
 
-  const prompt = buildOSINTPrompt(shortTermMarkets, openOrders, bankroll);
+  const prompt = buildOSINTPrompt(shortTermMarkets, openOrders, bankroll, history);
   _lastPrompt = prompt;
 
   log(`📡 Enviando ${shortTermMarkets.length} mercados ≤1h para análisis OSINT (${modelId})...`);
