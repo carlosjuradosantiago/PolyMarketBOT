@@ -167,7 +167,10 @@ For the top 3-5 candidates (highest confidence_prelim):
 SPORTS / ESPORTS markets:
   - REQUIRE bookmaker odds as primary sources (Pinnacle, Betfair, DraftKings, FanDuel, or equivalent).
   - If you have NO bookmaker odds data for a sports market → confidence MUST be ≤ 30 and do NOT recommend.
-  - Compare Polymarket price against implied bookmaker probability. Edge = difference between bookmaker-implied prob and Polymarket price.
+  - VIG REMOVAL: bookmaker lines include a margin (vig). Before comparing, normalize:
+      pImplied_fair = pImplied_raw / (pImplied_team1 + pImplied_team2).
+      Only compare the vig-free fair probability against pMarket. Without this step you may see phantom edge.
+  - Edge = pImplied_fair - pMarket (after vig removal).
   - Include injury reports, recent form, head-to-head records as supporting (not primary) evidence.
 
 ALL OTHER CATEGORIES:
@@ -182,8 +185,16 @@ ALL OTHER CATEGORIES:
 - The market's expiry time does NOT limit your analysis capability. Analyze with what you know NOW.
 - But do NOT claim certainty you don't have. Honest low confidence is better than fabricated high confidence.
 
+═══ NEAR-EXPIRY PENALTY ═══
+If expiresInMin < 30:
+  - Add +2% to friction (spread widens near expiry, harder to exit).
+  - Reduce confidence by 10 points (less time for price convergence).
+  - ONLY recommend if edge ≥ 0.15 (nearly double the normal threshold). Otherwise → reject.
+  - executionNotes MUST mention the near-expiry risk.
+
 ═══ STEP 0 — MANDATORY ANALYSIS (for EACH candidate market from Step A) ═══
 1. Identify the market's resolution rules (official source, definition, timezone).
+   If you CANNOT verify the resolution source or official rules → confidence MUST be ≤ 40 and do NOT recommend.
 2. ACTIVELY RESEARCH: search your knowledge for concrete data, recent facts, trends, historical context.
    - For weather/temperature: use weather data, historical averages, seasonal patterns, known forecasts.
    - For politics: use polls, official statements, legislative history, current political context.
@@ -209,19 +220,25 @@ ALL OTHER CATEGORIES:
 - Estimate pReal and conservative [pLow, pHigh] range (80% credible).
 - pMarket = YES price as decimal (already provided).
 - edge = pReal - pMarket.
-- DYNAMIC FRICTION ESTIMATE (do NOT use a fixed 2-3%):
+- DYNAMIC FRICTION ESTIMATE (do NOT use a fixed percentage):
   * spread_est: if Liq ≥ $50K → 0.5%; $10K-$50K → 1.0%; $2K-$10K → 2.0%; < $2K → 3.5%
-  * fee_est: 0.5% (Polymarket taker fee)
+  * fee_est: assume 0.5% unless you have specific fee data (fees may vary by program/period — treat 0.5% as default estimate, not a constant)
   * slippage_est: if Liq ≥ $50K → 0.2%; $10K-$50K → 0.5%; < $10K → 1.0%
-  * friction = spread_est + fee_est + slippage_est
+  * near_expiry_penalty: if expiresInMin < 30 → add +2.0% (see NEAR-EXPIRY PENALTY section)
+  * friction = spread_est + fee_est + slippage_est + near_expiry_penalty
   * evNet = edge - friction (must be > 0 to recommend)
 - Recommend ONLY if abs(edge) >= 0.08 AND confidence >= 60 AND evNet > 0.
 - A deviation of 8%+ indicates the market has NOT incorporated available information → that's what we're looking for.
 
-═══ SIZING + EXECUTION (SCALP) ═══
+═══ SIZING + EXECUTION (FRACTIONAL KELLY) ═══
+- SIZING METHOD: Quarter-Kelly (¼ Kelly). This is critical — prediction market probability estimates have calibration error.
+  Full Kelly is too aggressive; ¼ Kelly balances growth with drawdown protection.
+  * kellyFraction = (pReal * b - q) / b   where b = (1/price - 1), q = 1 - pReal
+  * sizeUsd = kellyFraction * 0.25 * bankroll   (the 0.25 is the ¼ Kelly multiplier)
+  * Hard cap: sizeUsd ≤ 10% bankroll (≤ $${(bankroll * 0.1).toFixed(2)}) regardless of Kelly output.
+  * If kellyFraction ≤ 0 → do NOT recommend (negative edge after friction).
 - orderType="LIMIT" always.
 - maxEntryPrice must ensure that, even after execution, abs(edge) >= 0.05 remains.
-- sizeUsd per trade ≤ 10% bankroll (≤ $${(bankroll * 0.1).toFixed(2)}).
 - Max 1 recommendation per clusterId.
 - DIVERSIFICATION: prefer thematic variety. Avoid concentrating more than 2 recommendations in the same category.
 - If primary data contradicts the current price → there's mispricing → RECOMMEND.
@@ -247,7 +264,7 @@ ALL OTHER CATEGORIES:
       "question": "...",
       "category": "politics|economy|weather|sports|esports|crypto|entertainment|science|geopolitics|other",
       "flag": "candidate|reject",
-      "skipReason": "1-2 lines: why rejected or why not recommended (data gaps, low edge, etc.)",
+      "notes": "1-2 lines: analysis notes — why rejected, data gaps, partial findings, or why not recommended",
       "confidence_prelim": 0,
       "clusterId": "...|null"
     }
