@@ -3,6 +3,7 @@ CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
 -- Schedule: call resolve-orders Edge Function every 5 minutes
+-- NOTE: Fixed in 20260215_fix_cron_auth.sql — was missing Authorization header
 SELECT cron.schedule(
   'resolve-paper-orders',       -- job name
   '*/5 * * * *',                -- every 5 minutes

@@ -46,19 +46,19 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
         </div>
       </div>
 
-      {/* Paper Balance (Equity) */}
+      {/* Paper Balance (Equity = cash + invested) */}
       <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
         <div className="text-xs text-bot-muted font-semibold tracking-wider uppercase mb-1">
-          {t("card.paperTrading")}
+          {t("card.equity")}
         </div>
         <div className="text-2xl font-bold text-white">
-          {formatCurrency(stats.current_balance)}
+          {formatCurrency(equity)}
         </div>
         <div className="text-xs text-bot-muted mt-1">
           {t("card.initial")}: {formatCurrency(stats.initial_balance)}
         </div>
         <div className="text-[10px] text-gray-600 mt-0.5">
-          🔒{formatCurrency(stats.invested_in_orders || 0)} {t("card.inPlay")} | {t("card.equity")}: {formatCurrency(equity)}
+          💵 {t("card.cash")}: {formatCurrency(stats.current_balance)} | 🔒 {t("card.inPlay")}: {formatCurrency(stats.invested_in_orders || 0)}
         </div>
       </div>
 

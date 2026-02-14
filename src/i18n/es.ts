@@ -34,6 +34,7 @@ const es = {
   "card.notConnected": "No conectada",
   "card.initial": "Inicial",
   "card.inPlay": "en juego",
+  "card.cash": "Disponible",
   "card.equity": "Equity",
   "card.roi": "ROI",
   "card.realized": "Realizado",
@@ -260,6 +261,11 @@ const es = {
   "console.prevCycle": "Ciclo anterior",
   "console.nextCycle": "Ciclo siguiente",
   "console.lastCycle": "Ir al último ciclo",
+  "console.view_all": "Todo",
+  "console.view_day": "Día",
+  "console.view_month": "Mes",
+  "console.view_year": "Año",
+  "console.cyclesInPeriod": "ciclos",
   "console.tabSummary": "📊 Resumen",
   "console.tabMatching": "🔗 Matching",
   "console.tabPool": "⏱️ Pool ≤1h",
@@ -382,6 +388,8 @@ const es = {
   // ─── Balance Chart ────────────────────────────────
   "chart.balanceHistory": "Historial de Balance",
   "chart.logScale": "(ESCALA LOG)",
+  "chart.equity": "EQUITY",
+  "chart.initial": "Inicial",
 
   // ─── Activity Log ─────────────────────────────────
   "activity.title": "Registro de Actividad",
