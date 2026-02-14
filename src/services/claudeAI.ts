@@ -91,7 +91,6 @@ function buildOSINTPrompt(
   shortTermMarkets: PolymarketMarket[],
   openOrders: PaperOrder[],
   bankroll: number,
-  totalAICost: number,
 ): string {
   const now = new Date();
 
@@ -129,7 +128,7 @@ INFORMATIONAL EDGE CATEGORIES — data the average market participant is slow to
 
 DATE/TIME (UTC): ${now.toISOString()}
 MODE: SCANNER
-BANKROLL: $${bankroll.toFixed(2)} | Accumulated AI cost: $${totalAICost.toFixed(4)}
+BANKROLL: $${bankroll.toFixed(2)}
 RISK: medium-low (preserve capital > maximize return)
 BOT MODE: RESPOND ONLY WITH VALID JSON. ZERO TEXT OUTSIDE JSON.
 
@@ -315,8 +314,7 @@ export async function analyzeMarketsWithClaude(
     };
   }
 
-  const tracker = await loadCostTracker();
-  const prompt = buildOSINTPrompt(shortTermMarkets, openOrders, bankroll, tracker.totalCostUsd);
+  const prompt = buildOSINTPrompt(shortTermMarkets, openOrders, bankroll);
   _lastPrompt = prompt;
 
   log(`📡 Enviando ${shortTermMarkets.length} mercados ≤1h para análisis OSINT (${modelId})...`);
