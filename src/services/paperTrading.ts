@@ -538,10 +538,11 @@ export function getBalanceHistory(
     }
   }
   
-  // Add current state
+  // Add current state — equity = cash + invested in open positions
+  const investedInOpen = portfolio.openOrders.reduce((sum, o) => sum + o.totalCost, 0);
   history.push({
     timestamp: "Now",
-    balance: portfolio.balance,
+    balance: portfolio.balance + investedInOpen,
     label: "Now",
   });
   
