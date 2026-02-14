@@ -321,6 +321,9 @@ function classifyMarketCategory(question: string): string {
  * Within each category, markets are sorted by volume (best first).
  * This ensures the batch sent to Claude has diverse topics.
  */
+/** Priority order: non-sports categories first (LLM has better edge there) */
+const CATEGORY_PRIORITY = ['weather', 'politics', 'geopolitics', 'entertainment', 'other', 'finance', 'crypto', 'sports'];
+
 function diversifyPool(markets: PolymarketMarket[], maxSize: number): PolymarketMarket[] {
   const buckets = new Map<string, PolymarketMarket[]>();
   for (const m of markets) {
@@ -331,8 +334,17 @@ function diversifyPool(markets: PolymarketMarket[], maxSize: number): Polymarket
   // Sort each bucket by volume descending
   for (const [, arr] of buckets) arr.sort((a, b) => b.volume - a.volume);
 
+  // Order categories by priority (non-sports first), then any unlisted
+  const categories = CATEGORY_PRIORITY.filter(c => buckets.has(c));
+  for (const c of buckets.keys()) {
+    if (!categories.includes(c)) categories.push(c);
+  }
+
+  // Cap sports at 40% of maxSize to leave room for higher-edge categories
+  const sportsCap = Math.floor(maxSize * 0.4);
+  let sportsCount = 0;
+
   const result: PolymarketMarket[] = [];
-  const categories = [...buckets.keys()];
   let round = 0;
 
   while (result.length < maxSize) {
@@ -340,7 +352,9 @@ function diversifyPool(markets: PolymarketMarket[], maxSize: number): Polymarket
     for (const cat of categories) {
       const arr = buckets.get(cat)!;
       if (round < arr.length) {
+        if (cat === 'sports' && sportsCount >= sportsCap) continue;
         result.push(arr[round]);
+        if (cat === 'sports') sportsCount++;
         added = true;
         if (result.length >= maxSize) break;
       }
@@ -430,9 +444,9 @@ function buildShortTermPool(
     if (m.resolved || !m.active) { bd.resolved++; continue; }
     if (timeLeft > _maxExpiryMs) { bd.tooFarOut++; continue; }
 
-    // ═══ AUTO-REJECT ULTRA NEAR EXPIRY (≤5 min) ═══
+    // ═══ AUTO-REJECT NEAR EXPIRY (≤10 min) ═══
     // These almost always end up rejected and waste Claude tokens
-    if (timeLeft <= 5 * 60 * 1000) { bd.expired++; continue; }
+    if (timeLeft <= 10 * 60 * 1000) { bd.expired++; continue; }
 
     // ═══ HARD LIQUIDITY/VOLUME FILTER ═══
     if (m.liquidity < MIN_LIQUIDITY || m.volume < MIN_VOLUME) {
