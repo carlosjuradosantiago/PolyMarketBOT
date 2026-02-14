@@ -30,3 +30,6 @@ _archive_server/
 data/
 .vercel
 .env*.local
+
+# Supabase migrations (contain project URLs / keys)
+supabase/migrations/
