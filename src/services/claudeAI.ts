@@ -19,8 +19,7 @@ function localTimestamp(): string {
 
 // ─── Constants ─────────────────────────────────────
 
-const CLAUDE_PROXY = "/api/claude/v1/messages";
-const ANTHROPIC_VERSION = "2023-06-01";
+const CLAUDE_PROXY = "/api/claude";
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   // Opus family
@@ -249,13 +248,9 @@ export async function analyzeMarketsWithClaude(
   shortTermMarkets: PolymarketMarket[],
   openOrders: PaperOrder[],
   bankroll: number,
-  apiKey?: string,
   model?: string,
 ): Promise<ClaudeResearchResult> {
-  const key = apiKey || import.meta.env.VITE_CLAUDE_API_KEY;
-  const modelId = model || import.meta.env.VITE_CLAUDE_MODEL || "claude-sonnet-4-20250514";
-
-  if (!key) throw new Error("VITE_CLAUDE_API_KEY no configurada");
+  const modelId = model || "claude-sonnet-4-20250514";
 
   if (shortTermMarkets.length === 0) {
     return {
@@ -279,9 +274,6 @@ export async function analyzeMarketsWithClaude(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": key,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
       model: modelId,
@@ -376,7 +368,7 @@ export async function analyzeMarketsWithClaude(
 // ─── Utility ─────────────────────────────────────────
 
 export function estimateAnalysisCost(marketCount: number, model?: string): number {
-  const modelId = model || import.meta.env.VITE_CLAUDE_MODEL || "claude-sonnet-4-20250514";
+  const modelId = model || "claude-sonnet-4-20250514";
   // ~50 tokens per market line + ~400 token prompt scaffold + ~20 per open order
   const estInput = 400 + (marketCount * 50);
   const estOutput = 300 + Math.min(marketCount, 5) * 250; // ~250 tokens per recommendation

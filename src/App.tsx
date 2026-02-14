@@ -31,7 +31,7 @@ import {
   getBalanceHistory,
 } from "./services/paperTrading";
 import { fetchAllMarkets } from "./services/polymarket";
-import { getWalletInfo, WalletInfo } from "./services/wallet";
+import { WalletInfo } from "./services/wallet";
 import { clearCachedCreds } from "./services/clobAuth";
 import { runSmartCycle, setMaxExpiry, clearAnalyzedCache } from "./services/smartTrader";
 import { loadCostTracker, resetCostTracker } from "./services/claudeAI";
@@ -136,20 +136,19 @@ function App() {
     loadWalletInfo();
   }, []);
   
-  // Load real wallet balance
+  // Load real wallet balance via secure server proxy (private key never in browser)
   const loadWalletInfo = async () => {
-    const privateKey = import.meta.env.VITE_PRIVATE_KEY;
-    if (privateKey) {
-      try {
-        const info = await getWalletInfo(privateKey);
-        setWalletInfo(info);
-        if (info.isValid && info.balance) {
-          console.log(`[Wallet] Connected: ${info.address}`);
-          console.log(`[Wallet] USDC: $${info.balance.usdc.toFixed(2)}, MATIC: ${info.balance.matic.toFixed(4)}`);
-        }
-      } catch (e) {
-        console.error("Error loading wallet:", e);
+    try {
+      const resp = await fetch("/api/wallet");
+      if (!resp.ok) return;
+      const info = await resp.json();
+      setWalletInfo(info);
+      if (info.isValid && info.balance) {
+        console.log(`[Wallet] Connected: ${info.address}`);
+        console.log(`[Wallet] USDC: $${info.balance.usdc.toFixed(2)}, MATIC: ${info.balance.matic.toFixed(4)}`);
       }
+    } catch (e) {
+      console.error("Error loading wallet:", e);
     }
   };
 
@@ -270,7 +269,7 @@ function App() {
       addActivity("🔬 Iniciando Deep Research OSINT...", "Inference");
       setIsAnalyzing(true);
 
-      const smartResult = await runSmartCycle(currentPortfolio, freshMarkets);
+      const smartResult = await runSmartCycle(currentPortfolio, freshMarkets, config.claude_model);
 
       // Update portfolio if bets were placed
       if (smartResult.betsPlaced.length > 0) {
