@@ -252,6 +252,16 @@ function App() {
       setStats(prev => ({ ...prev, markets_scanned: prev.markets_scanned + freshMarkets.length }));
       addActivity(t("app.marketsFound", String(freshMarkets.length)), "Info");
 
+      // ── Guard: don't run cycle with 0 markets (API issue) ──
+      if (freshMarkets.length === 0) {
+        addActivity("⚠️ API returned 0 markets — retrying in 60s", "Warning");
+        setIsAnalyzing(false);
+        dynamicIntervalRef.current = 60;
+        setCountdown(60);
+        setDynamicInterval(60);
+        return;
+      }
+
       // ── OSINT Research + Kelly Trading ──
       addActivity(t("app.startingResearch"), "Inference");
       setIsAnalyzing(true);

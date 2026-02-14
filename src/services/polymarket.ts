@@ -220,25 +220,79 @@ const FETCH_CACHE_TTL = 4 * 60 * 1000; // 4 min — re-use between cycle & panel
  * Fetch ALL markets using pagination.
  * Results are cached for 4 minutes to prevent duplicate fetches
  * when both the trading cycle and MarketsPanel request markets.
+ *
+ * Resilience: retries up to 3 times on failure, never caches empty results,
+ * and falls back to stale cache if a fresh fetch returns nothing.
  */
 export async function fetchAllMarkets(
   active: boolean = true,
   maxTotal: number = 12000,
   onProgress?: (loaded: number) => void,
 ): Promise<PolymarketMarket[]> {
-  // Return cache if still fresh
+  // Return cache if still fresh AND has data
   if (_cachedMarkets.length > 0 && Date.now() - _cacheTs < FETCH_CACHE_TTL) {
     log(`[fetchAllMarkets] Using cache (${_cachedMarkets.length} markets, age ${Math.round((Date.now() - _cacheTs) / 1000)}s)`);
     onProgress?.(_cachedMarkets.length);
     return _cachedMarkets;
   }
 
+  const result = await _fetchAllMarketsInner(active, maxTotal, onProgress);
+
+  // ── RESILIENCE: Never cache empty results; fall back to stale cache ──
+  if (result.length === 0) {
+    console.warn(`[fetchAllMarkets] ⚠️ Fetch returned 0 markets — possible API issue`);
+    if (_cachedMarkets.length > 0) {
+      const staleSecs = Math.round((Date.now() - _cacheTs) / 1000);
+      log(`[fetchAllMarkets] ♻️ Returning stale cache (${_cachedMarkets.length} markets, ${staleSecs}s old)`);
+      onProgress?.(_cachedMarkets.length);
+      return _cachedMarkets; // stale but non-empty
+    }
+    log(`[fetchAllMarkets] ❌ No cache available either — returning empty`);
+    return [];
+  }
+
+  // Only update cache with non-empty results
+  _cachedMarkets = result;
+  _cacheTs = Date.now();
+  return result;
+}
+
+/** Inner fetch with retry logic */
+async function _fetchAllMarketsInner(
+  active: boolean,
+  maxTotal: number,
+  onProgress?: (loaded: number) => void,
+): Promise<PolymarketMarket[]> {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 2000;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const markets = await _fetchAllMarketsSingle(active, maxTotal, onProgress);
+    if (markets.length > 0) return markets;
+
+    if (attempt < MAX_RETRIES) {
+      log(`[fetchAllMarkets] Attempt ${attempt}/${MAX_RETRIES} returned 0 markets — retrying in ${RETRY_DELAY_MS}ms...`);
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+    }
+  }
+
+  console.error(`[fetchAllMarkets] ❌ All ${MAX_RETRIES} attempts returned 0 markets`);
+  return [];
+}
+
+/** Single fetch attempt — paginate through Gamma API */
+async function _fetchAllMarketsSingle(
+  active: boolean,
+  maxTotal: number,
+  onProgress?: (loaded: number) => void,
+): Promise<PolymarketMarket[]> {
   const PAGE_SIZE = 500; // Gamma API allows up to ~500 per request
   const allMarkets: PolymarketMarket[] = [];
   const seenIds = new Set<string>();
   let offset = 0;
   let page = 0;
   const MAX_PAGES = Math.ceil(maxTotal / PAGE_SIZE);
+  let consecutiveErrors = 0;
 
   log(`[fetchAllMarkets] Fetching markets (max=${maxTotal})...`);
 
@@ -248,13 +302,24 @@ export async function fetchAllMarkets(
       
       const response = await fetch(url);
       if (!response.ok) {
-        console.warn(`[fetchAllMarkets] HTTP ${response.status} on page ${page + 1}, stopping`);
-        break;
+        console.warn(`[fetchAllMarkets] HTTP ${response.status} on page ${page + 1}`);
+        consecutiveErrors++;
+        // Allow up to 2 consecutive errors before giving up
+        if (consecutiveErrors >= 2) {
+          console.warn(`[fetchAllMarkets] ${consecutiveErrors} consecutive errors — stopping pagination`);
+          break;
+        }
+        // Skip this page and try the next offset
+        offset += PAGE_SIZE;
+        page++;
+        await new Promise(r => setTimeout(r, 500));
+        continue;
       }
 
+      consecutiveErrors = 0; // reset on success
       const data = await response.json();
       if (!Array.isArray(data) || data.length === 0) {
-        // Empty page, done
+        // Empty page — we've reached the end
         break;
       }
 
@@ -263,12 +328,10 @@ export async function fetchAllMarkets(
         .filter(Boolean) as PolymarketMarket[];
 
       // Deduplicate
-      let newCount = 0;
       for (const m of parsed) {
         if (!seenIds.has(m.id)) {
           seenIds.add(m.id);
           allMarkets.push(m);
-          newCount++;
         }
       }
 
@@ -288,14 +351,18 @@ export async function fetchAllMarkets(
       }
     } catch (error) {
       console.error(`[fetchAllMarkets] Error on page ${page + 1}:`, error);
-      break;
+      consecutiveErrors++;
+      if (consecutiveErrors >= 2) {
+        console.warn(`[fetchAllMarkets] ${consecutiveErrors} consecutive errors — stopping`);
+        break;
+      }
+      offset += PAGE_SIZE;
+      page++;
+      await new Promise(r => setTimeout(r, 500));
     }
   }
 
-  log(`[fetchAllMarkets] ✅ ${allMarkets.length} mercados en ${page + 1} páginas`);
-  // Update cache
-  _cachedMarkets = allMarkets;
-  _cacheTs = Date.now();
+  log(`[fetchAllMarkets] ${allMarkets.length > 0 ? "✅" : "⚠️"} ${allMarkets.length} mercados en ${page + 1} páginas`);
   return allMarkets;
 }
 
