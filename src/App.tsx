@@ -36,7 +36,7 @@ import { clearCachedCreds } from "./services/clobAuth";
 import { runSmartCycle, setMaxExpiry, clearAnalyzedCache } from "./services/smartTrader";
 import { loadCostTracker, resetCostTracker } from "./services/claudeAI";
 import { getBankrollStatus, canTrade } from "./services/kellyStrategy";
-import { dbGetBotState, dbSetBotState, dbAddActivity, dbGetActivities, dbAddActivitiesBatch, dbTriggerResolve, dbLoadPortfolio, dbSetInitialBalance } from "./services/db";
+import { dbGetBotState, dbSetBotState, dbAddActivity, dbGetActivities, dbAddActivitiesBatch, dbLoadPortfolio, dbSetInitialBalance } from "./services/db";
 import { loadPortfolioFromDB } from "./services/paperTrading";
 
 // One-time: clear stale CLOB credentials so fresh derive runs
@@ -117,9 +117,6 @@ function App() {
         if (dbActivities.length > 0) {
           setActivities(dbActivities);
         }
-
-        // Step 6: Trigger immediate resolution check
-        await dbTriggerResolve().catch(() => {});
 
         console.log("[App] DB state loaded successfully");
         // Apply config to smartTrader (use default 24 if field missing from saved config)
@@ -219,19 +216,7 @@ function App() {
     }
     
     try {
-      // Check for resolved orders via Supabase (single resolver — no duplicate)
-      const resolveResult = await dbTriggerResolve();
-      if (resolveResult.justResolved && resolveResult.justResolved.length > 0) {
-        resolveResult.justResolved.forEach((o: any) => {
-          const pnlStr = o.pnl >= 0 ? `+$${o.pnl.toFixed(2)}` : `-$${Math.abs(o.pnl).toFixed(2)}`;
-          addActivity(
-            `🔔 RESOLVED "${o.marketQuestion?.slice(0, 40)}..." → ${o.status?.toUpperCase()} ${pnlStr}`,
-            o.status === "won" ? "Resolved" : "Warning"
-          );
-        });
-      }
-      
-      // Reload portfolio from DB (always fresh after resolution)
+      // Reload portfolio from DB (Edge Function handles resolution server-side)
       const currentPortfolio = await loadPortfolioFromDB();
       setPortfolio(currentPortfolio);
       updateStatsFromPortfolio(currentPortfolio);
@@ -366,34 +351,6 @@ function App() {
   // Keep refs always pointing to latest values
   useEffect(() => { tradingCycleRef.current = runTradingCycle; }, [runTradingCycle]);
   // dynamicIntervalRef is now updated DIRECTLY (synchronously) in tradingCycle — no useEffect needed
-
-  // Auto-resolution poller: every 60s, check server for newly resolved orders
-  useEffect(() => {
-    const pollResolve = async () => {
-      try {
-        const result = await dbTriggerResolve();
-        if (result.justResolved && result.justResolved.length > 0) {
-          console.log(`[AutoResolver] ${result.justResolved.length} orders resolved`);
-          // Refresh portfolio from DB
-          const freshPortfolio = await loadPortfolioFromDB();
-          setPortfolio(freshPortfolio);
-          updateStatsFromPortfolio(freshPortfolio);
-          // Add resolution activities
-          result.justResolved.forEach((o: any) => {
-            const pnlStr = o.pnl >= 0 ? `+$${o.pnl.toFixed(2)}` : `-$${Math.abs(o.pnl).toFixed(2)}`;
-            addActivity(
-              `🔔 AUTO-RESOLVED "${o.marketQuestion?.slice(0, 40)}..." → ${o.status?.toUpperCase()} ${pnlStr}`,
-              o.status === "won" ? "Resolved" : "Warning"
-            );
-          });
-        }
-      } catch (e) {
-        // Silently ignore — server might not be running
-      }
-    };
-    const id = window.setInterval(pollResolve, 300_000); // 5 min (matches per-order cooldown)
-    return () => clearInterval(id);
-  }, [addActivity, updateStatsFromPortfolio]);
 
   // Run trading cycle effect — only depends on isRunning
   useEffect(() => {
