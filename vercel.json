@@ -2,6 +2,12 @@
   "buildCommand": "npx vite build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "crons": [
+    {
+      "path": "/api/resolve",
+      "schedule": "0 */6 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/gamma/:path*",
@@ -16,12 +22,11 @@
       "destination": "https://data-api.polymarket.com/:path*"
     },
     {
-      "source": "/api/claude/:path*",
-      "destination": "https://api.anthropic.com/:path*"
-    },
-    {
       "source": "/(.*)",
       "destination": "/index.html"
+    }
+  ]
+}
     }
   ]
 }

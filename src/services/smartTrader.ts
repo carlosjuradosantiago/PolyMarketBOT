@@ -463,6 +463,7 @@ function buildShortTermPool(
 export async function runSmartCycle(
   portfolio: Portfolio,
   allMarkets: PolymarketMarket[],
+  claudeModel?: string,
 ): Promise<SmartCycleResult> {
   // ─── Cycle Lock: prevent concurrent execution ─────
   // Check BOTH in-memory flag AND sessionStorage (survives HMR)
@@ -478,7 +479,7 @@ export async function runSmartCycle(
   _setCycleLock();
 
   try {
-    return await _runSmartCycleInner(portfolio, allMarkets);
+    return await _runSmartCycleInner(portfolio, allMarkets, claudeModel);
   } finally {
     _cycleRunning = false;
     _clearCycleLock();
@@ -488,6 +489,7 @@ export async function runSmartCycle(
 async function _runSmartCycleInner(
   portfolio: Portfolio,
   allMarkets: PolymarketMarket[],
+  claudeModel?: string,
 ): Promise<SmartCycleResult> {
   const activities: ActivityEntry[] = [];
   const betsPlaced: KellyResult[] = [];
@@ -542,7 +544,7 @@ async function _runSmartCycleInner(
     shortTermList: [],
     prompt: "",
     rawResponse: "",
-    model: import.meta.env.VITE_CLAUDE_MODEL || "claude-sonnet-4-20250514",
+    model: claudeModel || "claude-sonnet-4-20250514",
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
@@ -693,6 +695,7 @@ async function _runSmartCycleInner(
       poolForClaude,
       portfolio.openOrders,
       portfolio.balance,
+      claudeModel,
     );
 
     debugLog.prompt = aiResult.prompt;
