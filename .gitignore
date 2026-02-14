@@ -9,6 +9,9 @@ dist/
 .env.local
 .env.production
 
+# MCP config (contains API tokens)
+.vscode/mcp.json
+
 # Tauri build artifacts
 src-tauri/target/
 
