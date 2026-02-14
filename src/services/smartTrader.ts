@@ -691,10 +691,12 @@ async function _runSmartCycleInner(
     _persistThrottleState();
     log(`🔒 Throttle PRE-SET a ${new Date(_lastClaudeCallTime).toLocaleTimeString()} (antes de enviar a Claude)`);
 
+    // Use EQUITY (cash + invested) as bankroll, not just cash balance
+    const equityForClaude = portfolio.balance + portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
     aiResult = await analyzeMarketsWithClaude(
       poolForClaude,
       portfolio.openOrders,
-      portfolio.balance,
+      equityForClaude,
       claudeModel,
     );
 
