@@ -17,11 +17,11 @@ import {
   KellyResult,
   MarketAnalysis,
 } from "../types";
-import { analyzeMarketsWithClaude, loadCostTracker, formatCost, ClaudeResearchResult } from "./claudeAI";
+import { analyzeMarketsWithClaude, loadCostTracker, formatCost, ClaudeResearchResult, PerformanceHistory } from "./claudeAI";
 // loadCostTracker is now async (DB-only)
 import { calculateKellyBet, canTrade, getBankrollStatus, shouldAnalyze } from "./kellyStrategy";
 import { createPaperOrder } from "./paperTrading";
-import { dbSaveCycleLog, dbUpdateOrder } from "./db";
+import { dbSaveCycleLog, dbUpdateOrder, dbGetStats } from "./db";
 
 // ─── Config ───────────────────────────────────────────
 
@@ -697,11 +697,28 @@ async function _runSmartCycleInner(
 
     // Use EQUITY (cash + invested) as bankroll, not just cash balance
     const equityForClaude = portfolio.balance + portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
+
+    // Fetch performance history for calibration feedback
+    let perfHistory: PerformanceHistory | undefined;
+    try {
+      const stats = await dbGetStats();
+      perfHistory = {
+        totalTrades: stats.totalTrades,
+        wins: stats.wins,
+        losses: stats.losses,
+        totalPnl: stats.totalPnl,
+        winRate: stats.winRate,
+      };
+    } catch (e) {
+      log("⚠️ Could not fetch performance history:", e);
+    }
+
     aiResult = await analyzeMarketsWithClaude(
       poolForClaude,
       portfolio.openOrders,
       equityForClaude,
       claudeModel,
+      perfHistory,
     );
 
     debugLog.prompt = aiResult.prompt;
