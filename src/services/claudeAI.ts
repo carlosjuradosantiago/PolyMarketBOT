@@ -142,7 +142,7 @@ function buildOSINTPrompt(
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
 WEB SEARCH: You have web_search. Use it for your top 3-5 candidates. Search for:
-- Weather: official forecast (NWS/NOAA/AccuWeather). No forecast → skip.
+- Weather: official forecast from the national meteorological agency for that location (e.g. Met Office UK, KMA Korea, Environment Canada, MetService NZ, etc.) OR ECMWF/GFS consensus from reputable hosts. No forecast → skip. For US, use NWS/NOAA/AccuWeather. For other countries, use their official agency. Always cite agency name and URL. Each recommendation needs 1 official + 1 secondary source (or 2 secondary if no official available).
 - Politics/geopolitics: polls, official statements, vote counts.
 - Other: recent news, official data, expert analysis.
 Each recommendation needs ≥2 dated sources with URLs.
@@ -157,7 +157,8 @@ PROCESS: Scan ALL markets. Pick up to 5 with likely edge. web_search your top ca
 MATH:
   pReal = ALWAYS your probability that YES happens (regardless of which side you recommend).
   pMarket = YES price shown above.
-  edge = |pReal - pMarket| (must be ≥0.08)
+  edge = |pReal - pMarket| (must be ≥ minEdge for that market).
+  minEdge = max(0.06, 2*spread) (conservador) o max(0.05, 1.5*spread) (más jugable). Ejemplo: spread 8% → minEdge 12% (conservador) o 10% (jugable).
   If side=YES: you're betting pReal > pMarket. If side=NO: you're betting pReal < pMarket.
   friction = USE THE Spread SHOWN for each market. Near-expiry(<30min): add +2%.
   Weather with horizon>12h: use LIMIT orders.
@@ -373,35 +374,58 @@ export async function analyzeMarketsWithClaude(
     if (Array.isArray(parsed.recommendations)) {
       analyses = parsed.recommendations
         .filter((item: any) => item.recommendedSide && item.recommendedSide.toUpperCase() !== "SKIP")
-        .map((item: any) => ({
-          marketId: item.marketId || "",
-          question: item.question || "",
-          pMarket: parseFloat(item.pMarket) || 0,
-          pReal: parseFloat(item.pReal) || 0,
-          pLow: parseFloat(item.pLow) || 0,
-          pHigh: parseFloat(item.pHigh) || 0,
-          edge: Math.abs((parseFloat(item.pReal) || 0) - (parseFloat(item.pMarket) || 0)),
-          confidence: parseInt(item.confidence) || 0,
-          recommendedSide: (item.recommendedSide || "SKIP").toUpperCase(),
-          reasoning: item.reasoning || "",
-          sources: item.sources || [],
-          // SCALP fields
-          evNet: parseFloat(item.evNet) || undefined,
-          maxEntryPrice: parseFloat(item.maxEntryPrice) || undefined,
-          sizeUsd: parseFloat(item.sizeUsd) || undefined,
-          orderType: item.orderType || undefined,
-          clusterId: item.clusterId || null,
-          risks: item.risks || "",
-          resolutionCriteria: item.resolutionCriteria || "",
-          // Extra fields from improved prompt
-          category: item.category || undefined,
-          friction: parseFloat(item.friction) || undefined,
-          expiresInMin: parseInt(item.expiresInMin) || undefined,
-          liqUsd: parseFloat(item.liqUsd) || undefined,
-          volUsd: parseFloat(item.volUsd) || undefined,
-          dataFreshnessScore: parseInt(item.dataFreshnessScore) || undefined,
-          executionNotes: item.executionNotes || undefined,
-        }));
+        .map((item: any) => {
+          const side = (item.recommendedSide || "SKIP").toUpperCase();
+          let pReal = parseFloat(item.pReal) || 0;
+          const pMarket = parseFloat(item.pMarket) || 0;
+          let pLow = parseFloat(item.pLow) || 0;
+          let pHigh = parseFloat(item.pHigh) || 0;
+
+          // ═══ AUTO-FIX: Claude sometimes reports pReal as P(recommended side)
+          // instead of P(YES). Detect and correct:
+          // If side=NO and pReal > 0.50 → Claude meant "95% chance my NO is right"
+          // but we need P(YES) which would be 1-0.95 = 0.05
+          if (side === "NO" && pReal > 0.50) {
+            log(`⚠️ AUTO-FIX pReal: side=NO but pReal=${pReal} > 0.50 → Claude confused P(recommended) with P(YES). Flipping to ${(1 - pReal).toFixed(3)}`);
+            pReal = 1 - pReal;
+            // Also flip pLow/pHigh (they should also be P(YES))
+            const origLow = pLow;
+            pLow = 1 - pHigh;
+            pHigh = 1 - origLow;
+          }
+
+          const edge = Math.abs(pReal - pMarket);
+
+          return {
+            marketId: item.marketId || "",
+            question: item.question || "",
+            pMarket,
+            pReal,
+            pLow,
+            pHigh,
+            edge,
+            confidence: parseInt(item.confidence) || 0,
+            recommendedSide: side,
+            reasoning: item.reasoning || "",
+            sources: item.sources || [],
+            // SCALP fields
+            evNet: parseFloat(item.evNet) || undefined,
+            maxEntryPrice: parseFloat(item.maxEntryPrice) || undefined,
+            sizeUsd: parseFloat(item.sizeUsd) || undefined,
+            orderType: item.orderType || undefined,
+            clusterId: item.clusterId || null,
+            risks: item.risks || "",
+            resolutionCriteria: item.resolutionCriteria || "",
+            // Extra fields from improved prompt
+            category: item.category || undefined,
+            friction: parseFloat(item.friction) || undefined,
+            expiresInMin: parseInt(item.expiresInMin) || undefined,
+            liqUsd: parseFloat(item.liqUsd) || undefined,
+            volUsd: parseFloat(item.volUsd) || undefined,
+            dataFreshnessScore: parseInt(item.dataFreshnessScore) || undefined,
+            executionNotes: item.executionNotes || undefined,
+          };
+        });
     }
 
     log(`📋 Recommendations: ${analyses.length}`);
