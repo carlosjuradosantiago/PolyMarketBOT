@@ -19,7 +19,10 @@ function localTimestamp(): string {
 
 // ─── Constants ─────────────────────────────────────
 
-const CLAUDE_PROXY = "/api/claude";
+// Claude proxy via Supabase Edge Function (no timeout limits like Vercel Hobby)
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY as string;
+const CLAUDE_PROXY = `${SUPABASE_URL}/functions/v1/claude-proxy`;
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   // Opus family
@@ -332,6 +335,8 @@ export async function analyzeMarketsWithClaude(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "apikey": SUPABASE_KEY,
     },
     body: JSON.stringify({
       model: modelId,

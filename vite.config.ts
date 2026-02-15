@@ -32,22 +32,8 @@ export default defineConfig(async ({ mode }) => {
           rewrite: (path) => path.replace(/^\/api\/data/, ""),
           secure: true,
         },
-        "/api/claude": {
-          target: "https://api.anthropic.com",
-          changeOrigin: true,
-          rewrite: () => "/v1/messages",
-          secure: true,
-          configure: (proxy) => {
-            proxy.on("proxyReq", (proxyReq) => {
-              // Inject API key server-side (never sent from browser)
-              const key = env.CLAUDE_API_KEY || env.VITE_CLAUDE_API_KEY;
-              if (key) {
-                proxyReq.setHeader("x-api-key", key);
-                proxyReq.setHeader("anthropic-version", "2023-06-01");
-              }
-            });
-          },
-        },
+        // Claude proxy moved to Supabase Edge Function (no timeout limits)
+        // Frontend calls SUPABASE_URL/functions/v1/claude-proxy directly
         "/api/wallet": {
           // In dev, wallet endpoint is handled by the Vite proxy to a local handler
           // For now, return empty — wallet info is optional
