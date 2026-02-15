@@ -52,8 +52,10 @@ function _persistThrottleState() {
 // ─── Recently-analyzed cache: avoid re-sending same markets to Claude ──
 // Maps marketId → timestamp when last sent. Markets with recent analysis are excluded
 // from the pool unless enough time has passed (ANALYZED_CACHE_TTL).
+// TTL MUST match throttle interval — otherwise with a 35-market pool and 30min TTL,
+// cycles 2 & 3 see only 5-8 markets because 30 are still "recently analyzed".
 const ANALYZED_CACHE_KEY = '_smartTrader_analyzedMap';
-const ANALYZED_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min — don't re-analyze within this window
+const ANALYZED_CACHE_TTL_MS = MIN_CLAUDE_INTERVAL_MS; // = 10 min, same as throttle → every cycle sees full pool
 
 function _loadAnalyzedMap(): Map<string, number> {
   try {
@@ -664,13 +666,13 @@ async function _runSmartCycleInner(
   const freshPool = pool.filter(m => !analyzedMap.has(m.id));
   const analyzedSkipped = beforeDedup - freshPool.length;
   if (analyzedSkipped > 0) {
-    log(`🔄 ${analyzedSkipped} mercados ya analizados en últimos 30min — excluidos del pool`);
+    log(`🔄 ${analyzedSkipped} mercados ya analizados en último ciclo — excluidos del pool`);
     pool.length = 0;
     pool.push(...freshPool);
   }
 
   if (pool.length === 0 && analyzedSkipped > 0) {
-    const msg = `📋 Todos los ${analyzedSkipped} mercados ya fueron analizados en los últimos 30min. Esperando mercados nuevos...`;
+    const msg = `📋 Todos los ${analyzedSkipped} mercados ya fueron analizados en el último ciclo. Esperando mercados nuevos...`;
     log(msg);
     activities.push(activity(msg, "Info"));
     debugLog.error = msg;
