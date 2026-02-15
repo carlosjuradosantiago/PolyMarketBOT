@@ -361,9 +361,20 @@ export async function analyzeMarketsWithClaude(
   const contentBlocks: any[] = data.content || [];
   const textBlocks = contentBlocks.filter((b: any) => b.type === "text");
   const content = textBlocks.length > 0 ? textBlocks[textBlocks.length - 1].text : "";
-  // Count web searches for logging
-  const webSearchCount = contentBlocks.filter((b: any) => b.type === "server_tool_use" && b.name === "web_search").length;
-  if (webSearchCount > 0) log(`🌐 Web searches performed: ${webSearchCount}`);
+
+  // Count and log web searches performed
+  const webSearchUses = contentBlocks.filter((b: any) => b.type === "server_tool_use" && b.name === "web_search");
+  const webSearchResults = contentBlocks.filter((b: any) => b.type === "web_search_tool_result");
+  if (webSearchUses.length > 0) {
+    log(`🌐 Web searches: ${webSearchUses.length} performed, ${webSearchResults.length} results received`);
+    // Log search queries for transparency
+    webSearchUses.forEach((s: any, i: number) => {
+      const query = s.input?.query || "?";
+      log(`   🔍 Search ${i + 1}: "${query}"`);
+    });
+  } else {
+    log(`⚠️ No web searches performed — Claude should be using web_search tool!`);
+  }
   _lastRawResponse = content;
 
   log(`✅ Respuesta: ${elapsed}ms, ${inputTokens}↓ / ${outputTokens}↑, costo: $${costUsd.toFixed(4)}`);
