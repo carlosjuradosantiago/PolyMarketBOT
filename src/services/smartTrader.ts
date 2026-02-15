@@ -25,13 +25,13 @@ import { dbSaveCycleLog, dbUpdateOrder, dbGetStats } from "./db";
 
 // ─── Config ───────────────────────────────────────────
 
-let _maxExpiryMs = 24 * 60 * 60 * 1000;  // Default: 24 hours (configurable)
+let _maxExpiryMs = 72 * 60 * 60 * 1000;  // Default: 72 hours (configurable)
 const SCAN_INTERVAL_SECS = 600;          // 10 minutes between cycles
 
 // Minimum liquidity and volume to be worth analyzing (filter BEFORE Claude)
 // With sub-$10 bets, even relatively thin markets are fine for limit orders.
 const MIN_LIQUIDITY = 200;     // $200 — sufficient depth for $1-10 limit orders
-const MIN_VOLUME = 500;        // $500 — ensures market has some activity
+const MIN_VOLUME = 300;        // $300 — ensures market has some activity
 
 // Time throttle: enforce minimum 10 minutes between Claude API calls.
 // Markets are re-analyzed each cycle because prices/conditions change constantly.
@@ -479,6 +479,10 @@ function buildShortTermPool(
       clean.push(m);
     }
   }
+
+  // Log category distribution for debugging filter effectiveness
+  log(`  📦 Category breakdown — clean: ${clean.length}, crypto: ${cryptoBucket.length}, stocks: ${stocksBucket.length}, sports excluded: ${bd.sports}`);
+  log(`  📦 Other filters — noEndDate: ${bd.noEndDate}, expired: ${bd.expired}, resolved: ${bd.resolved}, tooFarOut: ${bd.tooFarOut}, junk: ${bd.junk}, lowLiq: ${bd.lowLiquidity}, dupeOpen: ${bd.duplicateOpen}`);
 
   // Initialize counts as "excluded"
   bd.crypto = cryptoBucket.length;
