@@ -44,22 +44,45 @@ export const WEATHER_RE = /temperature|°[cf]|weather|rain|snow|hurricane|tornad
 
 // ─── Liquidity / Volume / Price thresholds ───────────────────
 
-// Dynamic liquidity: max(MIN_LIQUIDITY_FLOOR, 100 × typical Kelly bet size)
+// Dynamic liquidity: max(MIN_LIQUIDITY_FLOOR, 100 × typical Kelly bet size), capped at $10K
 // This ensures markets have enough depth to absorb our orders without slippage.
 // With bankroll $100 and typical bet $2.50 → min_liq = max(500, 250) = $500
-// With bankroll $1000 and typical bet $25 → min_liq = max(500, 2500) = $2,500
+// With bankroll $1000 and typical bet $25 → min_liq = clamp(500, 2500, 10000) = $2,500
+// Cap at $10K so high bankrolls don't over-filter
 export const MIN_LIQUIDITY_FLOOR = 500;    // Absolute floor — never go below $500
+export const MIN_LIQUIDITY_CAP = 10_000;   // Absolute cap — never require more than $10K
 export const MIN_LIQUIDITY_MULTIPLIER = 100; // min_liq = 100× expected bet size
 export const MIN_VOLUME = 300;             // $300 — minimum trading activity
 export const WEATHER_MIN_LIQUIDITY = 500;  // weather with >12h horizon
 export const WEATHER_MIN_VOLUME = 300;
 
-/** Compute dynamic MIN_LIQUIDITY based on bankroll */
+/** Compute dynamic MIN_LIQUIDITY based on bankroll, capped at $10K */
 export function computeMinLiquidity(bankroll: number): number {
   // Typical bet = bankroll × KELLY_FRACTION(0.25) × MAX_BET_FRACTION(0.10) = 2.5% of bankroll
   const typicalBet = bankroll * 0.025;
-  return Math.max(MIN_LIQUIDITY_FLOOR, MIN_LIQUIDITY_MULTIPLIER * typicalBet);
+  const raw = Math.max(MIN_LIQUIDITY_FLOOR, MIN_LIQUIDITY_MULTIPLIER * typicalBet);
+  return Math.min(raw, MIN_LIQUIDITY_CAP);
 }
+
+/**
+ * Estimate bid/ask spread from liquidity (proxy — no real orderbook data).
+ * Based on empirical Polymarket observation:
+ *   Liq ≥ $50K → ~1%  (tight, market makers active)
+ *   $10-50K   → ~2-3% (decent depth)
+ *   $2-10K    → ~4-5% (moderate)
+ *   $1-2K     → ~6%   (thin)
+ *   < $1K     → ~8%+  (very thin, dangerous)
+ */
+export function estimateSpread(liquidity: number): number {
+  if (liquidity >= 50_000) return 0.01;
+  if (liquidity >= 10_000) return 0.025;
+  if (liquidity >= 2_000)  return 0.045;
+  if (liquidity >= 1_000)  return 0.06;
+  return 0.08;
+}
+
+/** Max acceptable estimated spread — reject markets above this */
+export const MAX_SPREAD = 0.08;  // 8%
 export const PRICE_FLOOR = 0.05;           // 5¢ — below this, edges are illusory
 export const PRICE_CEILING = 0.95;         // 95¢
 

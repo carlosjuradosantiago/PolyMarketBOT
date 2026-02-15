@@ -22,6 +22,7 @@ import {
   JUNK_PATTERNS, JUNK_REGEXES, WEATHER_RE,
   computeMinLiquidity, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
   PRICE_FLOOR, PRICE_CEILING, computeClusterKey,
+  estimateSpread, MAX_SPREAD,
 } from "./marketConstants";
 // loadCostTracker is now async (DB-only)
 import { calculateKellyBet, canTrade, getBankrollStatus, shouldAnalyze } from "./kellyStrategy";
@@ -159,6 +160,7 @@ export interface CycleDebugLog {
     stocks: number;         // excluded stocks/indices (0 if included via progressive relaxation)
     duplicateOpen: number;
     lowLiquidity: number;
+    wideSpread: number;       // rejected by spread guard (estimated spread > MAX_SPREAD)
     passed: number;
     filterLevel: number;    // 0=strict, 1=+crypto, 2=+crypto+stocks
     filterLabel: string;    // Human label: "Estricto", "+Crypto", etc.
@@ -389,6 +391,7 @@ function buildShortTermPool(
     stocks: 0,
     duplicateOpen: 0,
     lowLiquidity: 0,
+    wideSpread: 0,
     passed: 0,
     filterLevel: 0,
     filterLabel: FILTER_LEVEL_LABELS[0],
@@ -428,6 +431,18 @@ function buildShortTermPool(
       continue;
     }
 
+    // ═══ SPREAD GUARD (proxy from liquidity) ═══
+    // No real orderbook data → estimate spread from liquidity.
+    // Reject if estimated spread > MAX_SPREAD (8%) — these are too thin to trade.
+    // Weather exception: allowed through (patient limit orders fill better).
+    if (!isWeatherMarket) {
+      const estSpread = estimateSpread(m.liquidity);
+      if (estSpread > MAX_SPREAD) {
+        bd.wideSpread++;
+        continue;
+      }
+    }
+
     // ═══ DE FACTO RESOLVED — prices at extremes, no tradeable edge ═══
     const yp = parseFloat(m.outcomePrices[0] || "0.5");
     if (yp <= PRICE_FLOOR || yp >= PRICE_CEILING) {
@@ -460,7 +475,7 @@ function buildShortTermPool(
 
   // Log category distribution for debugging filter effectiveness
   log(`  📦 Category breakdown — clean: ${clean.length}, crypto: ${cryptoBucket.length}, stocks: ${stocksBucket.length}, sports excluded: ${bd.sports}`);
-  log(`  📦 Other filters — noEndDate: ${bd.noEndDate}, expired: ${bd.expired}, resolved: ${bd.resolved}, tooFarOut: ${bd.tooFarOut}, junk: ${bd.junk}, lowLiq: ${bd.lowLiquidity}, dupeOpen: ${bd.duplicateOpen}`);
+  log(`  📦 Other filters — noEndDate: ${bd.noEndDate}, expired: ${bd.expired}, resolved: ${bd.resolved}, tooFarOut: ${bd.tooFarOut}, junk: ${bd.junk}, lowLiq: ${bd.lowLiquidity}, wideSpread: ${bd.wideSpread}, dupeOpen: ${bd.duplicateOpen}`);
 
   // Initialize counts as "excluded"
   bd.crypto = cryptoBucket.length;
@@ -578,7 +593,7 @@ async function _runSmartCycleInner(
   const debugLog: CycleDebugLog = {
     timestamp: new Date().toISOString(),
     totalMarkets: allMarkets.length,
-    poolBreakdown: { total: 0, noEndDate: 0, expired: 0, resolved: 0, tooFarOut: 0, junk: 0, sports: 0, crypto: 0, stocks: 0, duplicateOpen: 0, lowLiquidity: 0, passed: 0, filterLevel: 0, filterLabel: "Estricto" },
+    poolBreakdown: { total: 0, noEndDate: 0, expired: 0, resolved: 0, tooFarOut: 0, junk: 0, sports: 0, crypto: 0, stocks: 0, duplicateOpen: 0, lowLiquidity: 0, wideSpread: 0, passed: 0, filterLevel: 0, filterLabel: "Estricto" },
     shortTermList: [],
     prompt: "",
     rawResponse: "",
@@ -645,7 +660,7 @@ async function _runSmartCycleInner(
   log(`   Filtrado: ${breakdown.tooFarOut} fuera ventana, ${breakdown.junk} junk, ${breakdown.sports} deportes excl, ${breakdown.crypto} crypto excl, ${breakdown.stocks} stocks excl, ${breakdown.lowLiquidity} baja liq, ${breakdown.duplicateOpen} ya abiertos`);
 
   activities.push(activity(
-    `⏱️ Pool ${expiryLabel}: ${pool.length} mercados [${breakdown.filterLabel}] (${breakdown.junk} junk, ${breakdown.sports} dep, ${breakdown.crypto} crypto, ${breakdown.lowLiquidity} baja liq, ${clustersCollapsed} cluster-dupes)`,
+    `⏱️ Pool ${expiryLabel}: ${pool.length} mercados [${breakdown.filterLabel}] (${breakdown.junk} junk, ${breakdown.sports} dep, ${breakdown.crypto} crypto, ${breakdown.lowLiquidity} baja liq, ${breakdown.wideSpread} spread, ${clustersCollapsed} cluster-dupes)`,
     "Market"
   ));
 
