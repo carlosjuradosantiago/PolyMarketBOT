@@ -162,6 +162,7 @@ MATH:
   pMarket = YES price shown above.
   edge = |pReal - pMarket| (must be ≥ minEdge for that market).
   minEdge = max(0.06, 2*spread) (conservador) o max(0.05, 1.5*spread) (más jugable). Ejemplo: spread 8% → minEdge 12% (conservador) o 10% (jugable).
+  MAX EDGE RULE: edges >30% are ALMOST ALWAYS wrong. If your pReal disagrees with pMarket by >25%, you are probably misunderstanding the market or overweighting one data point. Liquid markets ($5K+ volume) rarely misprice by >20%. Double-check your reasoning.
   If side=YES: you're betting pReal > pMarket. If side=NO: you're betting pReal < pMarket.
   friction = USE THE Spread SHOWN for each market. Near-expiry(<30min): add +2%.
   Weather with horizon>12h: use LIMIT orders.
