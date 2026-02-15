@@ -25,7 +25,6 @@ import {
   defaultAICostTracker,
 } from "./types";
 import {
-  loadPortfolio,
   savePortfolio,
   resetPortfolio,
   calculateStats,
@@ -89,16 +88,10 @@ function App() {
 
   // Initialize portfolio, wallet, and bot state from DB on mount
   useEffect(() => {
-    // Sync load from localStorage as fast fallback
-    const loaded = loadPortfolio();
-    setPortfolio(loaded);
-    updateStatsFromPortfolio(loaded);
-    
-    // Async load from DB (overrides localStorage data)
+    // Async load from DB (source of truth — never use defaults)
     (async () => {
       try {
-        // Step 1: Load portfolio from DB first to check if it was reset
-        // (skip localStorage sync — DB is source of truth after reset)
+        // Step 1: Load portfolio from DB
         const dbPortfolio = await loadPortfolioFromDB();
         setPortfolio(dbPortfolio);
         updateStatsFromPortfolio(dbPortfolio);
@@ -123,11 +116,10 @@ function App() {
         console.log("[App] DB state loaded successfully");
         // Apply config to smartTrader (use default 24 if field missing from saved config)
         setMaxExpiry(config.max_expiry_hours || 24);
-
-        // Clear stale localStorage portfolio to prevent re-sync of old orders
-        localStorage.removeItem('polymarket_paper_portfolio');
       } catch (e) {
-        console.warn("[App] DB load failed, using localStorage fallback:", e);
+        console.error("[App] DB load FAILED — keeping current state (NOT resetting):", e);
+        // CRITICAL: Do NOT call setPortfolio(defaultPortfolio) here!
+        // That would wipe the user's real data on a network hiccup.
       }
     })();
 
@@ -219,10 +211,21 @@ function App() {
     
     try {
       // Reload portfolio from DB (Edge Function handles resolution server-side)
-      const currentPortfolio = await loadPortfolioFromDB();
-      setPortfolio(currentPortfolio);
-      updateStatsFromPortfolio(currentPortfolio);
-      setBankrollStatus(getBankrollStatus(currentPortfolio.balance));
+      let currentPortfolio: Portfolio;
+      try {
+        currentPortfolio = await loadPortfolioFromDB();
+        setPortfolio(currentPortfolio);
+        updateStatsFromPortfolio(currentPortfolio);
+        setBankrollStatus(getBankrollStatus(currentPortfolio.balance));
+      } catch (dbErr) {
+        console.error("[Cycle] DB load failed — using last known portfolio (NOT resetting):", dbErr);
+        addActivity("⚠️ DB load failed — using cached portfolio, skipping cycle", "Warning");
+        setIsAnalyzing(false);
+        dynamicIntervalRef.current = 120;
+        setCountdown(120);
+        setDynamicInterval(120);
+        return;
+      }
 
       // If balance too low to trade, skip market scanning and AI entirely
       if (!canTrade(currentPortfolio.balance)) {
