@@ -44,8 +44,8 @@ export const WEATHER_RE = /temperature|°[cf]|weather|rain|snow|hurricane|tornad
 
 // ─── Liquidity / Volume / Price thresholds ───────────────────
 
-export const MIN_LIQUIDITY = 2000;         // $2K — keeps friction ≤3.5%
-export const MIN_VOLUME = 1000;            // $1K — filters out noise
+export const MIN_LIQUIDITY = 1000;         // $1K — more markets in pool (paper trading)
+export const MIN_VOLUME = 500;             // $500 — relaxed for paper trading
 export const WEATHER_MIN_LIQUIDITY = 500;  // weather with >12h horizon
 export const WEATHER_MIN_VOLUME = 500;
 export const PRICE_FLOOR = 0.05;           // 5¢ — below this, edges are illusory
