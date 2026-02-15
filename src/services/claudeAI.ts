@@ -142,13 +142,42 @@ function buildOSINTPrompt(
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
 WEB SEARCH: You have web_search (up to ${Math.min(shortTermMarkets.length * 5, 100)} uses — 5 per market). STRATEGY:
-1. WEATHER FIRST — weather markets are easiest to verify. Batch nearby cities in one search (e.g. "NWS forecast Chicago NYC Feb 17"). Search ALL weather markets, not just 3-5. Use the official national agency for each country: NWS/NOAA (US), Met Office (UK), Environment Canada (Canada), KMA (Korea), MetService (NZ), BOM (Australia), SMN (Argentina/Mexico), ECMWF/GFS for others. Always cite agency + URL.
+1. WEATHER FIRST — weather markets are easiest to verify. Search ALL weather markets. Batch nearby cities in one search (e.g. "NWS forecast Chicago NYC Feb 17").
 2. Then search remaining non-weather candidates with highest likely edge.
-3. NEVER say "no specific forecast data" for a major city — forecasts exist for every major city. If you don't have search uses left, say "not searched (budget exhausted)" instead of pretending data doesn't exist.
+3. NEVER say "no specific forecast data" or "no exact forecast" for a major city — forecasts exist for EVERY major city. You do NOT need an exact-degree forecast. You need the forecast HIGH (or hourly max) and then DERIVE the probability (see WEATHER METHOD below). If you don't have search uses left, say "not searched (budget exhausted)".
 4. Each recommendation needs ≥2 dated sources with URLs (1 official + 1 secondary, or 2 secondary).
 - Politics/geopolitics: polls, official statements, vote counts.
 - Entertainment: box office trackers (BoxOfficeMojo, Numbers), Rotten Tomatoes, streaming charts.
 - Finance: analyst consensus, recent price action, options flow.
+
+WEATHER SEARCH PROTOCOL (mandatory per country):
+  US: "NWS point forecast [city] [date]" → weather.gov. If no explicit High, use "Hourly Weather Forecast" and take daily max.
+  UK: "Met Office [city] forecast [date]"
+  Canada: "Environment Canada [city] forecast [date]"
+  South Korea: "KMA [city] forecast [date]" or "기상청 [city] 예보"
+  New Zealand: "MetService [city] forecast [date]"
+  Australia: "BOM [city] forecast [date]"
+  Argentina: "SMN [city] pronóstico [date]"
+  Mexico: "SMN México [city] pronóstico [date]"
+  Turkey: "MGM [city] tahmin [date]"
+  France: "Météo-France [city] prévisions [date]"
+  Brazil: "INMET [city] previsão [date]"
+  Other: search "[national weather agency] [city] forecast [date]"
+  FALLBACK: If official source fails, allow 1 official + 1 secondary (AccuWeather/Windy/Weather.com/TimeAndDate).
+
+WEATHER METHOD — deriving probability from forecasts (DO NOT require "exact X° forecast"):
+  1. Get the forecast HIGH (or hourly max for the target day) = μ (mean expected).
+  2. Determine uncertainty σ by forecast horizon:
+     <24h: σ ≈ 2°F (≈1.1°C)
+     24–48h: σ ≈ 3°F (≈1.7°C)
+     48–72h: σ ≈ 4°F (≈2.2°C)
+     >72h: σ ≈ 5°F (≈2.8°C)
+  3. For market types, compute pReal:
+     "exactly X°C" → bin [X-0.5, X+0.5]. pReal = P(temp in bin) ≈ (1/σ√2π) × e^(-(X-μ)²/2σ²). In practice: if |X-μ| < σ → pReal ≈ 0.25-0.40; if |X-μ| ≈ σ → pReal ≈ 0.10-0.20; if |X-μ| > 2σ → pReal < 0.05.
+     "X–Y°F" (2°F bin) → same as above but for bin [X, Y]. Wider bin = higher pReal.
+     "≥T" or "≤T" → pReal = Φ((μ-T)/σ) for ≥T, or Φ((T-μ)/σ) for ≤T. If μ is 5°F above T → pReal ≈ 0.95+. If μ is 2°F below T → pReal ≈ 0.15.
+  4. NARROW BIN EDGE RULE: For 1°F/1°C bins where YES price is 10¢-40¢, only recommend if forecast μ is >6°F/3°C away from the bin (bet NO). Otherwise the bin is too noisy — skip.
+  5. Your pReal MUST be mathematically consistent with μ, σ, and the bin. Show the math briefly in reasoning.
 
 BLACKLIST (already own): ${blacklist}
 
@@ -162,7 +191,6 @@ MATH:
   pMarket = YES price shown above.
   edge = |pReal - pMarket| (must be ≥ minEdge for that market).
   minEdge = max(0.06, 2*spread) (conservador) o max(0.05, 1.5*spread) (más jugable). Ejemplo: spread 8% → minEdge 12% (conservador) o 10% (jugable).
-  MAX EDGE RULE: edges >30% are ALMOST ALWAYS wrong. If your pReal disagrees with pMarket by >25%, you are probably misunderstanding the market or overweighting one data point. Liquid markets ($5K+ volume) rarely misprice by >20%. Double-check your reasoning.
   If side=YES: you're betting pReal > pMarket. If side=NO: you're betting pReal < pMarket.
   friction = USE THE Spread SHOWN for each market. Near-expiry(<30min): add +2%.
   Weather with horizon>12h: use LIMIT orders.
@@ -170,12 +198,13 @@ MATH:
   kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.25*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
   Confidence ≥60 required. <2 sources → confidence ≤40 → skip.
   LOW VOLUME RULE: if Vol < $3K, cap confidence at 65 max (price more easily manipulated) unless you have direct primary-source data (official government data, NWS forecast, etc.).
-  WEATHER SANITY CHECK: If your forecast says high=X°F/°C and the market asks about a SPECIFIC temperature T:
-    - If T is >5°F/3°C away from forecast: pReal ≤ 0.15 (very unlikely exact hit).
-    - If market asks "≥T" and forecast < T: pReal must reflect that (likely low).
-    - NEVER assign pReal > 0.50 for exact-temperature markets unless forecast is within ±2°F/1°C.
-    - Your reasoning MUST be consistent with the data you found. Do NOT say "forecast shows 4°C" then assign pReal=0.85 for ≥7°C.
+  WEATHER: Use the WEATHER METHOD above to derive pReal from forecast. Do NOT require exact-degree forecasts. Do NOT skip weather markets saying "no specific forecast data" — derive pReal from forecast HIGH + uncertainty σ.
   Max 1 per cluster (mutually exclusive markets). Price must be 5¢-95¢.
+
+CRITICAL RULES:
+  - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL and verified it in THIS session. Hallucinating resolution data is FORBIDDEN. If you haven't verified, treat the market as unresolved.
+  - NEVER skip a weather market saying "no specific forecast data" — use the WEATHER METHOD with forecast HIGH + σ.
+  - For entertainment/box office: only claim resolved if you found the actual data via web_search with a URL. Weekend estimates ≠ final results.
 
 OUTPUT: Raw JSON only, no code fence.
 {

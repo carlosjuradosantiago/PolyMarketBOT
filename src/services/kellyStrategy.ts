@@ -22,7 +22,6 @@ const KELLY_FRACTION = 0.25;          // Quarter-Kelly for safety
 const MAX_BET_FRACTION = 0.10;        // Never more than 10% of bankroll
 const MIN_BET_USD = 1.00;             // Polymarket platform minimum order size ($1 USDC)
 const MIN_EDGE_AFTER_COSTS = 0.06;    // 6% minimum net edge (after AI costs, before 8% gross)
-const MAX_EDGE = 0.30;                // Reject edges >30% — almost always AI overconfidence, not real mispricing
 const MIN_CONFIDENCE = 60;            // Skip below this confidence (matches prompt threshold)
 const MIN_MARKET_PRICE = 0.02;        // Skip outcomes under 2¢ (lottery tickets — prompt tells AI to avoid <3¢)
 const MAX_MARKET_PRICE = 0.98;        // Skip outcomes over 98¢ (no upside)
@@ -146,14 +145,6 @@ export function calculateKellyBet(
 
   // Calculate raw edge
   const grossEdge = pReal - pMarket;
-
-  // Reject suspiciously large edges — almost always AI error, not real mispricing
-  if (grossEdge > MAX_EDGE) {
-    skipResult.edge = grossEdge;
-    skipResult.reasoning = `Edge ${(grossEdge * 100).toFixed(1)}% > max ${(MAX_EDGE * 100)}% — likely AI overconfidence (market with real liquidity rarely misprice by >${(MAX_EDGE * 100)}%)`;
-    log(`⚠️ REJECTED: edge ${(grossEdge * 100).toFixed(1)}% exceeds MAX_EDGE ${(MAX_EDGE * 100)}% — ${market.question.slice(0, 50)}`);
-    return skipResult;
-  }
 
   // Factor in AI cost per bet
   const aiCostPerBet = aiCostForThisBatch / Math.max(1, marketsInBatch);
