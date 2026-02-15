@@ -153,9 +153,16 @@ const es = {
   // Advanced filters
   "markets.botView": "🤖 Vista Bot",
   "markets.botViewDesc": "Mismos filtros que envía a Claude",
+  "markets.requireEndDate": "📅 Con Expiración",
+  "markets.excludeExpired": "⏰ Sin Expirados",
+  "markets.excludeNearExpiry": "⚡ Sin <10min",
   "markets.excludeSports": "🚫 Sin Deportes",
   "markets.excludeJunk": "🗑️ Sin Junk",
   "markets.excludeExtremes": "💀 Sin Extremos (≤2¢/≥98¢)",
+  "markets.excludeOpenOrders": "🔒 Sin Órdenes Abiertas",
+  "markets.maxExpiry": "Expira en",
+  "markets.maxExpiry.none": "Sin límite",
+  "markets.botPoolCount": "Pool del bot",
 
   // ─── Orders Panel ─────────────────────────────────
   "orders.tabActive": "Activas",

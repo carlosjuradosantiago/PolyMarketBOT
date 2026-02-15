@@ -5,6 +5,7 @@ import {
   TimeframeFilter,
   CategoryFilter,
   defaultFilters,
+  defaultConfig,
   PaperOrder,
   Portfolio,
 } from "../types";
@@ -80,10 +81,15 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
     }
   };
 
+  // Build set of market IDs with open orders (for duplicate filter)
+  const openOrderMarketIds = useMemo(() => {
+    return new Set(portfolio.openOrders.map(o => o.marketId));
+  }, [portfolio.openOrders]);
+
   // Filter markets
   const filteredMarkets = useMemo(() => {
-    return filterMarkets(markets, filters);
-  }, [markets, filters]);
+    return filterMarkets(markets, filters, openOrderMarketIds);
+  }, [markets, filters, openOrderMarketIds]);
 
   // Visible subset for performance (don't render 10K+ DOM nodes)
   const visibleMarkets = useMemo(() => {
@@ -169,18 +175,20 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
           </div>
         </div>
 
-        {/* Filters Row 1 */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {/* Filters Row 1: Dropdowns */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {/* Timeframe */}
           <div>
             <label className="block text-xs text-gray-500 mb-1">{t("markets.expiry")}</label>
             <select
-              value={filters.timeframe}
+              value={filters.botView ? 'all' : filters.timeframe}
+              disabled={filters.botView}
               onChange={(e) =>
                 setFilters({ ...filters, timeframe: e.target.value as TimeframeFilter })
               }
-              className="w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
-                       text-sm text-white focus:border-bot-green outline-none"
+              className={`w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
+                       text-sm text-white focus:border-bot-green outline-none
+                       ${filters.botView ? 'opacity-40 cursor-not-allowed' : ''}`}
             >
               {timeframeValues.map((val) => (
                 <option key={val} value={val}>
@@ -213,14 +221,18 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
           <div>
             <label className="block text-xs text-gray-500 mb-1">{t("markets.minVolume")}</label>
             <select
-              value={filters.minVolume}
+              value={filters.botView ? 300 : filters.minVolume}
+              disabled={filters.botView}
               onChange={(e) =>
                 setFilters({ ...filters, minVolume: parseInt(e.target.value) })
               }
-              className="w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
-                       text-sm text-white focus:border-bot-green outline-none"
+              className={`w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
+                       text-sm text-white focus:border-bot-green outline-none
+                       ${filters.botView ? 'opacity-40 cursor-not-allowed' : ''}`}
             >
               <option value={0}>{t("markets.vol.none")}</option>
+              <option value={200}>$200+</option>
+              <option value={300}>$300+ ⭐</option>
               <option value={1000}>$1K+</option>
               <option value={5000}>$5K+</option>
               <option value={10000}>$10K+</option>
@@ -233,20 +245,45 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
           <div>
             <label className="block text-xs text-gray-500 mb-1">{t("markets.minLiquidity" as any)}</label>
             <select
-              value={filters.minLiquidity}
+              value={filters.botView ? 200 : filters.minLiquidity}
+              disabled={filters.botView}
               onChange={(e) =>
                 setFilters({ ...filters, minLiquidity: parseInt(e.target.value) })
               }
-              className="w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
-                       text-sm text-white focus:border-bot-green outline-none"
+              className={`w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
+                       text-sm text-white focus:border-bot-green outline-none
+                       ${filters.botView ? 'opacity-40 cursor-not-allowed' : ''}`}
             >
               <option value={0}>{t("markets.liq.none" as any)}</option>
               <option value={100}>$100+</option>
-              <option value={200}>$200+</option>
+              <option value={200}>$200+ ⭐</option>
               <option value={500}>$500+</option>
               <option value={1000}>$1K+</option>
               <option value={5000}>$5K+</option>
-              <option value={10000}>$10K+</option>
+            </select>
+          </div>
+
+          {/* Max Expiry (bot uses 72h) */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">{t("markets.maxExpiry" as any)}</label>
+            <select
+              value={filters.botView ? defaultConfig.max_expiry_hours : filters.maxExpiryHours}
+              disabled={filters.botView}
+              onChange={(e) =>
+                setFilters({ ...filters, maxExpiryHours: parseInt(e.target.value) })
+              }
+              className={`w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
+                       text-sm text-white focus:border-bot-green outline-none
+                       ${filters.botView ? 'opacity-40 cursor-not-allowed' : ''}`}
+            >
+              <option value={0}>{t("markets.maxExpiry.none" as any)}</option>
+              <option value={1}>1h</option>
+              <option value={4}>4h</option>
+              <option value={8}>8h</option>
+              <option value={24}>24h</option>
+              <option value={72}>72h ⭐</option>
+              <option value={168}>7d</option>
+              <option value={720}>30d</option>
             </select>
           </div>
 
@@ -271,7 +308,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
             onClick={() => setFilters({ ...filters, botView: !filters.botView })}
             className={`px-3 py-1.5 text-xs rounded-lg border transition-all font-medium
                      ${filters.botView
-                       ? 'bg-bot-green/20 border-bot-green text-bot-green'
+                       ? 'bg-bot-green/20 border-bot-green text-bot-green shadow-[0_0_8px_rgba(0,255,136,0.3)]'
                        : 'bg-bot-bg border-bot-border text-gray-400 hover:border-gray-500'}`}
             title={t("markets.botViewDesc" as any)}
           >
@@ -280,13 +317,46 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
 
           <div className="w-px h-5 bg-bot-border" />
 
+          {/* Require End Date */}
+          <button
+            onClick={() => setFilters({ ...filters, requireEndDate: !filters.requireEndDate })}
+            className={`px-2 py-1 text-xs rounded-lg border transition-all
+                     ${filters.requireEndDate || filters.botView
+                       ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400'
+                       : 'bg-bot-bg border-bot-border text-gray-500 hover:border-gray-500'}`}
+          >
+            {t("markets.requireEndDate" as any)}
+          </button>
+
+          {/* Exclude Expired */}
+          <button
+            onClick={() => setFilters({ ...filters, excludeExpired: !filters.excludeExpired })}
+            className={`px-2 py-1 text-xs rounded-lg border transition-all
+                     ${filters.excludeExpired || filters.botView
+                       ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400'
+                       : 'bg-bot-bg border-bot-border text-gray-500 hover:border-gray-500'}`}
+          >
+            {t("markets.excludeExpired" as any)}
+          </button>
+
+          {/* Exclude Near Expiry */}
+          <button
+            onClick={() => setFilters({ ...filters, excludeNearExpiry: !filters.excludeNearExpiry })}
+            className={`px-2 py-1 text-xs rounded-lg border transition-all
+                     ${filters.excludeNearExpiry || filters.botView
+                       ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400'
+                       : 'bg-bot-bg border-bot-border text-gray-500 hover:border-gray-500'}`}
+          >
+            {t("markets.excludeNearExpiry" as any)}
+          </button>
+
           {/* Exclude Sports */}
           <button
             onClick={() => setFilters({ ...filters, excludeSports: !filters.excludeSports })}
-            className={`px-3 py-1.5 text-xs rounded-lg border transition-all
+            className={`px-2 py-1 text-xs rounded-lg border transition-all
                      ${filters.excludeSports || filters.botView
                        ? 'bg-red-500/15 border-red-500/40 text-red-400'
-                       : 'bg-bot-bg border-bot-border text-gray-400 hover:border-gray-500'}`}
+                       : 'bg-bot-bg border-bot-border text-gray-500 hover:border-gray-500'}`}
           >
             {t("markets.excludeSports" as any)}
           </button>
@@ -294,10 +364,10 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
           {/* Exclude Junk */}
           <button
             onClick={() => setFilters({ ...filters, excludeJunk: !filters.excludeJunk })}
-            className={`px-3 py-1.5 text-xs rounded-lg border transition-all
+            className={`px-2 py-1 text-xs rounded-lg border transition-all
                      ${filters.excludeJunk || filters.botView
                        ? 'bg-yellow-500/15 border-yellow-500/40 text-yellow-400'
-                       : 'bg-bot-bg border-bot-border text-gray-400 hover:border-gray-500'}`}
+                       : 'bg-bot-bg border-bot-border text-gray-500 hover:border-gray-500'}`}
           >
             {t("markets.excludeJunk" as any)}
           </button>
@@ -305,12 +375,26 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
           {/* Exclude Extremes */}
           <button
             onClick={() => setFilters({ ...filters, excludeExtremes: !filters.excludeExtremes })}
-            className={`px-3 py-1.5 text-xs rounded-lg border transition-all
+            className={`px-2 py-1 text-xs rounded-lg border transition-all
                      ${filters.excludeExtremes || filters.botView
                        ? 'bg-purple-500/15 border-purple-500/40 text-purple-400'
-                       : 'bg-bot-bg border-bot-border text-gray-400 hover:border-gray-500'}`}
+                       : 'bg-bot-bg border-bot-border text-gray-500 hover:border-gray-500'}`}
           >
             {t("markets.excludeExtremes" as any)}
+          </button>
+
+          {/* Exclude Open Orders */}
+          <button
+            onClick={() => setFilters({ ...filters, excludeOpenOrders: !filters.excludeOpenOrders })}
+            className={`px-2 py-1 text-xs rounded-lg border transition-all
+                     ${filters.excludeOpenOrders || filters.botView
+                       ? 'bg-orange-500/15 border-orange-500/40 text-orange-400'
+                       : 'bg-bot-bg border-bot-border text-gray-500 hover:border-gray-500'}`}
+          >
+            {t("markets.excludeOpenOrders" as any)}
+            {openOrderMarketIds.size > 0 && (
+              <span className="ml-1 text-[10px] opacity-70">({openOrderMarketIds.size})</span>
+            )}
           </button>
         </div>
       </div>
