@@ -64,7 +64,7 @@ export default function AIPanel({
   maxExpiryHours,
 }: AIPanelProps) {
   const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null);
-  const [detailCache, setDetailCache] = useState<Record<number, { prompt: string | null; rawResponse: string | null }>>({}); 
+  const [detailCache, setDetailCache] = useState<Record<number, { prompt: string | null; rawResponse: string | null; skipped: { marketId: string; question: string; reason: string }[] }>>({}); 
   const [loadingDetail, setLoadingDetail] = useState<number | null>(null);
   const { t } = useTranslation();
 
@@ -83,7 +83,7 @@ export default function AIPanel({
         setDetailCache(prev => ({ ...prev, [dbId]: detail }));
       } catch (e) {
         console.error("[AIPanel] Failed to fetch AI cost detail:", e);
-        setDetailCache(prev => ({ ...prev, [dbId]: { prompt: null, rawResponse: null } }));
+        setDetailCache(prev => ({ ...prev, [dbId]: { prompt: null, rawResponse: null, skipped: [] } }));
       } finally {
         setLoadingDetail(null);
       }
@@ -385,6 +385,25 @@ export default function AIPanel({
                         <div className="text-xs text-yellow-400 animate-pulse">{t("ai.loadingPrompt")}</div>
                       ) : (
                         <>
+                          {/* Skipped markets (rejection reasons from Claude) */}
+                          {detail?.skipped && detail.skipped.length > 0 && (
+                            <div>
+                              <div className="text-xs font-semibold text-orange-400 mb-1">
+                                ⛔ Descartados por IA ({detail.skipped.length})
+                              </div>
+                              <div className="bg-black/40 rounded p-2 max-h-40 overflow-y-auto space-y-1">
+                                {detail.skipped.map((s, si) => (
+                                  <div key={si} className="text-[10px] leading-relaxed flex gap-2">
+                                    <span className="text-orange-400/60 shrink-0">•</span>
+                                    <span className="text-gray-500 truncate max-w-[45%]" title={s.question}>{s.question}</span>
+                                    <span className="text-gray-600">→</span>
+                                    <span className="text-orange-300/80">{s.reason}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           {/* Prompt sent */}
                           <div>
                             <div className="text-xs font-semibold text-cyan-400 mb-1 flex items-center">{t("ai.promptSent")}<CopyBtn text={detail?.prompt} /></div>
