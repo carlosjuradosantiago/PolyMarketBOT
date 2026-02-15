@@ -18,6 +18,11 @@ import {
   MarketAnalysis,
 } from "../types";
 import { analyzeMarketsWithClaude, loadCostTracker, formatCost, ClaudeResearchResult, PerformanceHistory } from "./claudeAI";
+import {
+  JUNK_PATTERNS, JUNK_REGEXES, WEATHER_RE,
+  MIN_LIQUIDITY, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
+  PRICE_FLOOR, PRICE_CEILING, computeClusterKey,
+} from "./marketConstants";
 // loadCostTracker is now async (DB-only)
 import { calculateKellyBet, canTrade, getBankrollStatus, shouldAnalyze } from "./kellyStrategy";
 import { createPaperOrder } from "./paperTrading";
@@ -28,11 +33,8 @@ import { dbSaveCycleLog, dbUpdateOrder, dbGetStats } from "./db";
 let _maxExpiryMs = 72 * 60 * 60 * 1000;  // Default: 72 hours (configurable)
 const SCAN_INTERVAL_SECS = 600;          // 10 minutes between cycles
 
-// Minimum liquidity and volume to be worth analyzing (filter BEFORE Claude)
-// Friction tiers: Liq>=$50K→1.2% | $10-50K→2% | $2-10K→3.5% | <$2K→5%
-// With <$2K liq, 5% friction eats most edges. $2K+ gets 3.5% which is workable.
-const MIN_LIQUIDITY = 2000;    // $2K — keeps friction ≤3.5%, avoids 5% tier
-const MIN_VOLUME = 1000;       // $1K — enough activity to confirm real market interest
+// Minimum liquidity/volume/price thresholds imported from marketConstants.ts
+// (single source of truth shared with polymarket.ts Bot View)
 
 // Time throttle: enforce minimum 10 minutes between Claude API calls.
 // Markets are re-analyzed each cycle because prices/conditions change constantly.
@@ -266,29 +268,7 @@ function deduplicateCorrelatedMarkets(analyses: MarketAnalysis[]): MarketAnalysi
   return result;
 }
 
-/**
- * Extract a "cluster key" from a question by removing numbers/thresholds.
- * Examples:
- *   "highest temperature in Seoul be 8°C" → "highest temperature in seoul be °c"
- *   "highest temperature in Seoul be 9°C or higher" → "highest temperature in seoul be °c or higher"
- *   "GDP growth above 3%?" → "gdp growth above %?"
- *   "Bitcoin above $50,000?" → "bitcoin above $?"
- */
-function computeClusterKey(question: string): string {
-  let q = question.toLowerCase().trim();
-
-  // Remove specific numbers but keep the structure
-  // Replace digits (including decimals, negatives, commas) with a placeholder
-  q = q.replace(/[-+]?\d[\d,]*\.?\d*/g, "#");
-
-  // Normalize whitespace
-  q = q.replace(/\s+/g, " ");
-
-  // Remove very short results (too generic)
-  if (q.length < 15) return "";
-
-  return q;
-}
+// computeClusterKey imported from marketConstants.ts
 
 // ─── Pre-filter: markets expiring ≤maxExpiry — PROGRESSIVE ─────
 
@@ -301,7 +281,7 @@ const FILTER_LEVEL_LABELS = ["Estricto", "+Crypto", "+Crypto+Stocks", "Todo (sin
 const MAX_BATCHES_PER_CYCLE = 3;
 
 // ─── Category classifier for pool diversification ─────
-const weatherPatterns = /temperature|°[cf]|weather|rain|snow|hurricane|tornado|wind speed|heat wave|cold|frost|humidity|celsius|fahrenheit|forecast|precipitation|storm|flood|drought|wildfire|nws|noaa/;
+// WEATHER_RE imported from marketConstants.ts
 const politicsPatterns = /trump|biden|harris|congress|senate|house of rep|election|vote|poll|president|governor|democrat|republican|gop|legislation|bill sign|executive order|supreme court|scotus|impeach|primary|caucus|cabinet|veto|filibuster/;
 const geopoliticsPatterns = /war|military|invasion|nato|united nations|\bun\b|sanction|tariff|trade war|ceasefire|peace deal|treaty|summit|nuclear|missile|refugee|occupation|annexation/;
 const entertainmentPatterns = /oscar|grammy|emmy|movie|film|box office|album|song|concert|tv show|series|streaming|netflix|disney|spotify|billboard|ratings|premiere|celebrity|award/;
@@ -313,7 +293,7 @@ function classifyMarketCategory(market: PolymarketMarket): string {
   const q = market.question.toLowerCase();
   if (cryptoPatterns.some(p => q.includes(p))) return 'crypto';
   if (stockPatterns.some(p => q.includes(p))) return 'finance';
-  if (weatherPatterns.test(q)) return 'weather';
+  if (WEATHER_RE.test(q)) return 'weather';
   if (politicsPatterns.test(q)) return 'politics';
   if (geopoliticsPatterns.test(q)) return 'geopolitics';
   if (entertainmentPatterns.test(q)) return 'entertainment';
@@ -435,54 +415,25 @@ function buildShortTermPool(
     // ═══ HARD LIQUIDITY/VOLUME FILTER ═══
     // Weather exception: thin but high-edge markets with >12h horizon allow lower thresholds
     // (patient limit orders fill at better prices in these markets)
-    const isWeatherMarket = weatherPatterns.test(q) && timeLeft > 12 * 60 * 60 * 1000;
-    const minLiq = isWeatherMarket ? 500 : MIN_LIQUIDITY;
-    const minVol = isWeatherMarket ? 500 : MIN_VOLUME;
+    const isWeatherMarket = WEATHER_RE.test(q) && timeLeft > 12 * 60 * 60 * 1000;
+    const minLiq = isWeatherMarket ? WEATHER_MIN_LIQUIDITY : MIN_LIQUIDITY;
+    const minVol = isWeatherMarket ? WEATHER_MIN_VOLUME : MIN_VOLUME;
     if (m.liquidity < minLiq || m.volume < minVol) {
       bd.lowLiquidity++;
       continue;
     }
 
     // ═══ DE FACTO RESOLVED — prices at extremes, no tradeable edge ═══
-    // Skip markets where YES price is ≤5¢ or ≥95¢
-    // Prompt tells Claude "Price must be 3¢-97¢" but we filter tighter because:
-    // - 3-5¢ markets need 8%+ edge on top of 3.5%+ friction = 11.5%+ actual prob shift
-    // - Claude almost always rejects these = wasted tokens
     const yp = parseFloat(m.outcomePrices[0] || "0.5");
-    if (yp <= 0.05 || yp >= 0.95) {
+    if (yp <= PRICE_FLOOR || yp >= PRICE_CEILING) {
       bd.junk++; // count as junk since they're untradeable
       continue;
     }
 
     // ─── Junk / noise (ALWAYS excluded, no progressive) ───
-    const junkPatterns = [
-      // Social media noise
-      "tweet", "tweets", "post on x", "post on twitter", "retweet",
-      "truth social post", "truth social",
-      "tiktok", "instagram", "youtube video", "viral",
-      "# of ", "#1 free app", "app store", "play store",
-      // Follower/subscriber counting
-      "how many", "number of", "followers", "subscribers",
-      "most streamed", "most viewed",
-      // Specific personality noise
-      "elon musk", "musk post", "musk tweet",
-      // Trivial games
-      "spelling bee", "wordle", "jeopardy", "wheel of fortune",
-      "chatgpt",
-      // Prop bets Claude can't verify (no public data source)
-      "robot dancer", "robot dance", "have robot",
-      "will .* say ", "say \"" ,  // "will X say Y during Z" — unverifiable speech props
-      "160-179", "180-199", "200-219",  // arbitrary count ranges on posts/actions
-      "gala", "spring festival",  // Chinese TV show props
-      "fundraiser",  // private event speech props
-    ];
-    if (junkPatterns.some(j => q.includes(j))) { bd.junk++; continue; }
-    // Regex patterns for complex junk detection
-    const junkRegexes = [
-      /will .{1,40} say .{1,30} during/,  // "will X say Y during Z" speech props
-      /\d{2,3}-\d{2,3}\s*(posts?|tweets?|times?)/,  // "160-179 posts" count ranges
-    ];
-    if (junkRegexes.some(r => r.test(q))) { bd.junk++; continue; }
+    // Patterns & regexes imported from marketConstants.ts (shared with Bot View)
+    if (JUNK_PATTERNS.some(j => q.includes(j))) { bd.junk++; continue; }
+    if (JUNK_REGEXES.some(r => r.test(q))) { bd.junk++; continue; }
 
     // ─── Skip if already have open order ───
     if (openOrderMarketIds.has(m.id)) { bd.duplicateOpen++; continue; }

@@ -2,6 +2,11 @@
 // Connects to real Polymarket APIs for market data
 
 import { PolymarketEvent, PolymarketMarket, MarketFilters, TimeframeFilter } from "../types";
+import {
+  JUNK_PATTERNS, JUNK_REGEXES, WEATHER_RE,
+  MIN_LIQUIDITY, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
+  PRICE_FLOOR, PRICE_CEILING,
+} from "./marketConstants";
 
 // Use Vite proxy to avoid CORS in browser
 const GAMMA_API = "/api/gamma";
@@ -591,34 +596,7 @@ export function filterMarketsByCategory(
   return markets.filter(m => m.category === category);
 }
 
-// Junk patterns shared between individual filter and bot view
-const JUNK_PATTERNS = [
-  // Social media noise
-  "tweet", "tweets", "post on x", "post on twitter", "retweet",
-  "truth social post", "truth social",
-  "tiktok", "instagram", "youtube video", "viral",
-  "# of ", "#1 free app", "app store", "play store",
-  // Follower/subscriber counting
-  "how many", "number of", "followers", "subscribers",
-  "most streamed", "most viewed",
-  // Specific personality noise
-  "elon musk", "musk post", "musk tweet",
-  // Trivial games
-  "spelling bee", "wordle", "jeopardy", "wheel of fortune",
-  "chatgpt",
-  // Prop bets Claude can't verify
-  "robot dancer", "robot dance", "have robot",
-  "gala", "spring festival",
-  "fundraiser",
-];
-
-// Regex patterns for complex junk
-const JUNK_REGEXES = [
-  /will .{1,40} say .{1,30} during/,
-  /\d{2,3}-\d{2,3}\s*(posts?|tweets?|times?)/,
-];
-
-const WEATHER_RE = /temperature|°[cf]|weather|rain|snow|hurricane|tornado|wind speed|heat wave|cold|frost|humidity|celsius|fahrenheit|forecast|precipitation|storm|flood|drought|wildfire|nws|noaa/;
+// Junk/weather/threshold constants imported from marketConstants.ts (single source of truth)
 
 export function filterMarkets(
   markets: PolymarketMarket[],
@@ -644,14 +622,14 @@ export function filterMarkets(
       if (timeLeft <= 10 * 60 * 1000) return false;
       // 5. Exclude sports
       if (m.category === 'sports') return false;
-      // 6. Min liquidity/volume (weather exception: $500 instead of $2K)
+      // 6. Min liquidity/volume (weather exception)
       const q = m.question.toLowerCase();
       const isWeather = WEATHER_RE.test(q) && timeLeft > 12 * 60 * 60 * 1000;
-      if (m.liquidity < (isWeather ? 500 : 2000)) return false;
-      if (m.volume < (isWeather ? 500 : 1000)) return false;
-      // 7. Price extremes (5¢-95¢)
+      if (m.liquidity < (isWeather ? WEATHER_MIN_LIQUIDITY : MIN_LIQUIDITY)) return false;
+      if (m.volume < (isWeather ? WEATHER_MIN_VOLUME : MIN_VOLUME)) return false;
+      // 7. Price extremes
       const yp = parseFloat(m.outcomePrices[0] || '0.5');
-      if (yp <= 0.05 || yp >= 0.95) return false;
+      if (yp <= PRICE_FLOOR || yp >= PRICE_CEILING) return false;
       // 8. Junk patterns
       if (JUNK_PATTERNS.some(j => q.includes(j))) return false;
       if (JUNK_REGEXES.some(r => r.test(q))) return false;

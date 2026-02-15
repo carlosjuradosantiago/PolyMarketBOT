@@ -17,6 +17,7 @@ import {
   formatVolume,
   formatTimeRemaining,
 } from "../services/polymarket";
+import { computeClusterKey } from "../services/marketConstants";
 import { createPaperOrder } from "../services/paperTrading";
 import { useTranslation } from "../i18n";
 
@@ -91,6 +92,18 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
     return filterMarkets(markets, filters, openOrderMarketIds);
   }, [markets, filters, openOrderMarketIds]);
 
+  // Count unique clusters (what Claude would actually see after dedup)
+  const uniqueClusterCount = useMemo(() => {
+    if (!filters.botView) return 0;
+    const keys = new Set<string>();
+    let uniqueIdx = 0;
+    for (const m of filteredMarkets) {
+      const key = computeClusterKey(m.question) || `__u_${uniqueIdx++}`;
+      keys.add(key);
+    }
+    return keys.size;
+  }, [filteredMarkets, filters.botView]);
+
   // Visible subset for performance (don't render 10K+ DOM nodes)
   const visibleMarkets = useMemo(() => {
     return filteredMarkets.slice(0, displayCount);
@@ -156,6 +169,11 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
             <span className="text-bot-green">📊</span> {t("markets.title")}
             <span className="text-xs text-gray-500 font-normal">
               ({filteredMarkets.length.toLocaleString()} {t("markets.marketsCount")}{markets.length !== filteredMarkets.length ? ` ${t("markets.of")} ${markets.length.toLocaleString()}` : ""})
+              {filters.botView && uniqueClusterCount < filteredMarkets.length && (
+                <span className="ml-1 text-cyan-400" title="After cluster dedup — what Claude actually sees">
+                  → {uniqueClusterCount} unique
+                </span>
+              )}
             </span>
           </h2>
           <div className="flex items-center gap-3">
