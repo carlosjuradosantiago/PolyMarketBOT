@@ -155,9 +155,16 @@ const en: { [K in keyof typeof es]: string } = {
   // Advanced filters
   "markets.botView": "🤖 Bot View",
   "markets.botViewDesc": "Same filters sent to Claude",
+  "markets.requireEndDate": "📅 Has Expiry",
+  "markets.excludeExpired": "⏰ No Expired",
+  "markets.excludeNearExpiry": "⚡ No <10min",
   "markets.excludeSports": "🚫 No Sports",
   "markets.excludeJunk": "🗑️ No Junk",
   "markets.excludeExtremes": "💀 No Extremes (≤2¢/≥98¢)",
+  "markets.excludeOpenOrders": "🔒 No Open Orders",
+  "markets.maxExpiry": "Expires in",
+  "markets.maxExpiry.none": "No limit",
+  "markets.botPoolCount": "Bot pool",
 
   // ─── Orders Panel ─────────────────────────────────
   "orders.tabActive": "Active",

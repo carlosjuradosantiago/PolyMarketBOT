@@ -591,36 +591,129 @@ export function filterMarketsByCategory(
   return markets.filter(m => m.category === category);
 }
 
+// Junk patterns shared between individual filter and bot view
+const JUNK_PATTERNS = [
+  "tweet", "tweets", "post on x", "post on twitter", "retweet",
+  "how many", "number of", "followers", "subscribers",
+  "elon musk", "musk post", "musk tweet",
+  "tiktok", "instagram", "youtube video", "viral",
+  "# of ", "#1 free app", "app store", "play store",
+  "chatgpt", "most streamed", "most viewed",
+  "spelling bee", "wordle", "jeopardy", "wheel of fortune",
+];
+
+const WEATHER_RE = /temperature|°[cf]|weather|rain|snow|hurricane|tornado|wind speed|heat wave|cold|frost|humidity|celsius|fahrenheit|forecast|precipitation|storm|flood|drought|wildfire|nws|noaa/;
+
 export function filterMarkets(
   markets: PolymarketMarket[],
-  filters: MarketFilters
+  filters: MarketFilters,
+  openOrderMarketIds?: Set<string>,
 ): PolymarketMarket[] {
   let filtered = markets;
-  
-  // Filter by timeframe
+  const now = Date.now();
+
+  // ── Bot View: overrides individual toggles with bot's exact logic ──
+  if (filters.botView) {
+    const maxMs = (filters.maxExpiryHours || 72) * 60 * 60 * 1000;
+    filtered = filtered.filter(m => {
+      // 1. Must have endDate
+      if (!m.endDate) return false;
+      const endTime = new Date(m.endDate).getTime();
+      const timeLeft = endTime - now;
+      // 2. Not expired / not resolved
+      if (timeLeft <= 0 || m.resolved || !m.active) return false;
+      // 3. Within max expiry window
+      if (timeLeft > maxMs) return false;
+      // 4. Not near expiry (>10 min)
+      if (timeLeft <= 10 * 60 * 1000) return false;
+      // 5. Exclude sports
+      if (m.category === 'sports') return false;
+      // 6. Min liquidity/volume (weather exception)
+      const q = m.question.toLowerCase();
+      const isWeather = WEATHER_RE.test(q) && timeLeft > 12 * 60 * 60 * 1000;
+      if (m.liquidity < (isWeather ? 100 : 200)) return false;
+      if (m.volume < (isWeather ? 200 : 300)) return false;
+      // 7. Price extremes
+      const yp = parseFloat(m.outcomePrices[0] || '0.5');
+      if (yp <= 0.02 || yp >= 0.98) return false;
+      // 8. Junk patterns
+      if (JUNK_PATTERNS.some(j => q.includes(j))) return false;
+      // 9. No duplicate open orders
+      if (openOrderMarketIds && openOrderMarketIds.has(m.id)) return false;
+      return true;
+    });
+
+    // Still apply search + category UI selects on top of bot view
+    if (filters.category !== 'all') {
+      filtered = filterMarketsByCategory(filtered, filters.category);
+    }
+    if (filters.searchQuery.trim()) {
+      const query = filters.searchQuery.toLowerCase();
+      filtered = filtered.filter(m =>
+        m.question.toLowerCase().includes(query) ||
+        (m.description || "").toLowerCase().includes(query)
+      );
+    }
+    return filtered;
+  }
+
+  // ── Individual filters (non-bot-view mode) ──
+
+  // Timeframe
   filtered = filterMarketsByTimeframe(filtered, filters.timeframe);
-  
-  // Filter by category
+
+  // Category
   filtered = filterMarketsByCategory(filtered, filters.category);
-  
-  // Filter by volume
+
+  // Volume
   filtered = filtered.filter(m => m.volume >= filters.minVolume);
-  
-  // Filter by liquidity
+
+  // Liquidity
   filtered = filtered.filter(m => m.liquidity >= filters.minLiquidity);
-  
-  // Filter by search query
+
+  // Search query
   if (filters.searchQuery.trim()) {
     const query = filters.searchQuery.toLowerCase();
-    filtered = filtered.filter(m => 
+    filtered = filtered.filter(m =>
       m.question.toLowerCase().includes(query) ||
       (m.description || "").toLowerCase().includes(query)
     );
   }
-  
-  // Filter resolved markets
+
+  // Resolved
   if (!filters.showResolved) {
     filtered = filtered.filter(m => !m.resolved);
+  }
+
+  // Require end date
+  if (filters.requireEndDate) {
+    filtered = filtered.filter(m => !!m.endDate);
+  }
+
+  // Exclude expired
+  if (filters.excludeExpired) {
+    filtered = filtered.filter(m => {
+      if (!m.endDate) return true; // no endDate = not expired
+      return new Date(m.endDate).getTime() > now && m.active && !m.resolved;
+    });
+  }
+
+  // Max expiry hours (0 = no limit)
+  if (filters.maxExpiryHours > 0) {
+    const maxMs = filters.maxExpiryHours * 60 * 60 * 1000;
+    filtered = filtered.filter(m => {
+      if (!m.endDate) return false;
+      const timeLeft = new Date(m.endDate).getTime() - now;
+      return timeLeft > 0 && timeLeft <= maxMs;
+    });
+  }
+
+  // Exclude near expiry (≤10 min)
+  if (filters.excludeNearExpiry) {
+    filtered = filtered.filter(m => {
+      if (!m.endDate) return true;
+      return new Date(m.endDate).getTime() - now > 10 * 60 * 1000;
+    });
   }
 
   // Exclude sports
@@ -628,7 +721,7 @@ export function filterMarkets(
     filtered = filtered.filter(m => m.category !== 'sports');
   }
 
-  // Exclude price extremes (≤2¢ or ≥98¢)
+  // Exclude price extremes
   if (filters.excludeExtremes) {
     filtered = filtered.filter(m => {
       const yp = parseFloat(m.outcomePrices[0] || '0.5');
@@ -636,57 +729,17 @@ export function filterMarkets(
     });
   }
 
-  // Exclude junk/noise markets (same patterns as smartTrader)
+  // Exclude junk
   if (filters.excludeJunk) {
-    const junkPatterns = [
-      "tweet", "tweets", "post on x", "post on twitter", "retweet",
-      "how many", "number of", "followers", "subscribers",
-      "elon musk", "musk post", "musk tweet",
-      "tiktok", "instagram", "youtube video", "viral",
-      "# of ", "#1 free app", "app store", "play store",
-      "chatgpt", "most streamed", "most viewed",
-      "spelling bee", "wordle", "jeopardy", "wheel of fortune",
-    ];
     filtered = filtered.filter(m => {
       const q = m.question.toLowerCase();
-      return !junkPatterns.some(j => q.includes(j));
+      return !JUNK_PATTERNS.some(j => q.includes(j));
     });
   }
 
-  // Bot View: apply ALL smartTrader pre-filters at once
-  if (filters.botView) {
-    const now = Date.now();
-    filtered = filtered.filter(m => {
-      // Must have endDate and not be expired
-      if (!m.endDate) return false;
-      const endTime = new Date(m.endDate).getTime();
-      const timeLeft = endTime - now;
-      if (timeLeft <= 0) return false;
-      if (timeLeft <= 10 * 60 * 1000) return false; // ≤10 min
-      // Exclude sports (API-based category)
-      if (m.category === 'sports') return false;
-      // Min liquidity $200, min volume $300 (weather exception)
-      const q = m.question.toLowerCase();
-      const isWeather = /temperature|°[cf]|weather|rain|snow|hurricane|tornado|forecast|precipitation|storm/.test(q) && timeLeft > 12 * 60 * 60 * 1000;
-      const minLiq = isWeather ? 100 : 200;
-      const minVol = isWeather ? 200 : 300;
-      if (m.liquidity < minLiq || m.volume < minVol) return false;
-      // Price extremes
-      const yp = parseFloat(m.outcomePrices[0] || '0.5');
-      if (yp <= 0.02 || yp >= 0.98) return false;
-      // Junk patterns
-      const junkPatterns = [
-        "tweet", "tweets", "post on x", "post on twitter", "retweet",
-        "how many", "number of", "followers", "subscribers",
-        "elon musk", "musk post", "musk tweet",
-        "tiktok", "instagram", "youtube video", "viral",
-        "# of ", "#1 free app", "app store", "play store",
-        "chatgpt", "most streamed", "most viewed",
-        "spelling bee", "wordle", "jeopardy", "wheel of fortune",
-      ];
-      if (junkPatterns.some(j => q.includes(j))) return false;
-      return true;
-    });
+  // Exclude markets with open orders
+  if (filters.excludeOpenOrders && openOrderMarketIds) {
+    filtered = filtered.filter(m => !openOrderMarketIds.has(m.id));
   }
 
   return filtered;

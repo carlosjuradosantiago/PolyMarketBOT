@@ -97,10 +97,16 @@ export interface MarketFilters {
   minLiquidity: number;
   searchQuery: string;
   showResolved: boolean;
-  excludeJunk: boolean;
-  excludeSports: boolean;
-  excludeExtremes: boolean;  // prices ≤2¢ or ≥98¢
-  botView: boolean;          // apply ALL bot filters at once
+  // ─── Bot-matching filters ───
+  requireEndDate: boolean;     // only markets with expiry date
+  excludeExpired: boolean;     // not expired & active
+  excludeNearExpiry: boolean;  // >10 min remaining
+  excludeSports: boolean;      // API-based sports detection
+  excludeJunk: boolean;        // tweet/followers/trivia noise
+  excludeExtremes: boolean;    // prices ≤2¢ or ≥98¢
+  excludeOpenOrders: boolean;  // skip markets with existing bets
+  maxExpiryHours: number;      // 0 = no limit, else max hours to expiry
+  botView: boolean;            // apply ALL bot filters with bot defaults
 }
 
 export const defaultFilters: MarketFilters = {
@@ -110,9 +116,14 @@ export const defaultFilters: MarketFilters = {
   minLiquidity: 0,
   searchQuery: "",
   showResolved: false,
-  excludeJunk: false,
+  requireEndDate: false,
+  excludeExpired: false,
+  excludeNearExpiry: false,
   excludeSports: false,
+  excludeJunk: false,
   excludeExtremes: false,
+  excludeOpenOrders: false,
+  maxExpiryHours: 0,
   botView: false,
 };
 
