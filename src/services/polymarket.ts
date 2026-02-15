@@ -29,24 +29,89 @@ function getTimeframeHours(tf: TimeframeFilter): number {
   }
 }
 
-function categorizeMarket(title: string, description: string): string {
+/**
+ * Categorize a market using the REAL data from the Polymarket API.
+ *
+ * The Gamma API returns several fields that reliably identify sports markets:
+ *   - sportsMarketType ("totals", "spreads", "moneyline", etc.)
+ *   - gameId, teamAID, teamBID  (only set for sports)
+ *   - tags[] / categories[]     (labels like "Sports", "Esports", etc.)
+ *
+ * We check those first. Only if the API didn't provide structured metadata
+ * do we fall back to lightweight keyword matching.
+ */
+function categorizeMarket(
+  title: string,
+  description: string,
+  apiRaw?: any,          // pass the raw API object so we can read native fields
+): string {
+  // ── 1. Definitive API fields — highest priority ──
+  if (apiRaw) {
+    // sportsMarketType is ONLY set for sports/esports markets
+    if (apiRaw.sportsMarketType) return "sports";
+    // gameId / team IDs are sports-only
+    if (apiRaw.gameId || apiRaw.teamAID || apiRaw.teamBID) return "sports";
+
+    // tags[] / categories[] — check nested event data too
+    const tagLabels: string[] = [];
+    const catLabels: string[] = [];
+
+    // Market-level tags & categories
+    if (Array.isArray(apiRaw.tags)) {
+      tagLabels.push(...apiRaw.tags.map((t: any) => (t.label || t.slug || "").toLowerCase()));
+    }
+    if (Array.isArray(apiRaw.categories)) {
+      catLabels.push(...apiRaw.categories.map((c: any) => (c.label || c.slug || "").toLowerCase()));
+    }
+
+    // Event-level tags & categories (events[] is nested in market response)
+    if (Array.isArray(apiRaw.events)) {
+      for (const ev of apiRaw.events) {
+        if (Array.isArray(ev.tags)) {
+          tagLabels.push(...ev.tags.map((t: any) => (t.label || t.slug || "").toLowerCase()));
+        }
+        if (Array.isArray(ev.categories)) {
+          catLabels.push(...ev.categories.map((c: any) => (c.label || c.slug || "").toLowerCase()));
+        }
+        // Series-level tags & categories
+        if (Array.isArray(ev.series)) {
+          for (const s of ev.series) {
+            if (Array.isArray(s.tags)) {
+              tagLabels.push(...s.tags.map((t: any) => (t.label || t.slug || "").toLowerCase()));
+            }
+            if (Array.isArray(s.categories)) {
+              catLabels.push(...s.categories.map((c: any) => (c.label || c.slug || "").toLowerCase()));
+            }
+          }
+        }
+      }
+    }
+
+    const allLabels = [...tagLabels, ...catLabels];
+
+    // Map API labels → our CategoryFilter values
+    const sportsKeywords = ["sports", "sport", "esports", "e-sports", "football", "soccer", "basketball", "baseball", "hockey", "tennis", "mma", "boxing", "cricket", "golf", "motorsport", "racing"];
+    if (allLabels.some(l => sportsKeywords.some(k => l.includes(k)))) return "sports";
+
+    if (allLabels.some(l => l.includes("politic") || l.includes("election") || l.includes("government"))) return "politics";
+    if (allLabels.some(l => l.includes("crypto") || l.includes("bitcoin") || l.includes("defi") || l.includes("blockchain"))) return "crypto";
+    if (allLabels.some(l => l.includes("entertain") || l.includes("culture") || l.includes("pop culture") || l.includes("music") || l.includes("movie"))) return "entertainment";
+    if (allLabels.some(l => l.includes("science") || l.includes("tech") || l.includes("space") || l.includes("climate"))) return "science";
+    if (allLabels.some(l => l.includes("business") || l.includes("finance") || l.includes("economics") || l.includes("stocks"))) return "business";
+  }
+
+  // ── 2. Lightweight keyword fallback (only when API metadata absent) ──
   const text = (title + " " + description).toLowerCase();
-  
-  if (text.includes("trump") || text.includes("biden") || text.includes("election") || 
+
+  if (text.includes("trump") || text.includes("biden") || text.includes("election") ||
       text.includes("president") || text.includes("congress") || text.includes("senate") ||
       text.includes("vote") || text.includes("democrat") || text.includes("republican")) {
     return "politics";
   }
-  if (text.includes("bitcoin") || text.includes("btc") || text.includes("ethereum") || 
+  if (text.includes("bitcoin") || text.includes("btc") || text.includes("ethereum") ||
       text.includes("eth") || text.includes("crypto") || text.includes("solana") ||
       text.includes("token") || text.includes("coin")) {
     return "crypto";
-  }
-  if (text.includes("nfl") || text.includes("nba") || text.includes("ufc") || 
-      text.includes("soccer") || text.includes("football") || text.includes("basketball") ||
-      text.includes("tennis") || text.includes("match") || text.includes("game") ||
-      text.includes("team") || text.includes("vs") || text.includes("championship")) {
-    return "sports";
   }
   if (text.includes("movie") || text.includes("oscar") || text.includes("grammy") ||
       text.includes("album") || text.includes("celebrity") || text.includes("tv") ||
@@ -125,7 +190,7 @@ function parseMarket(m: any): PolymarketMarket | null {
       resolved: m.resolved === true || m.resolved === "true" || m.closed === true,
       resolutionSource: m.resolutionSource,
       description: m.description || "",
-      category: categorizeMarket(question, m.description || ""),
+      category: categorizeMarket(question, m.description || "", m),
       image: m.image || m.icon,
     };
   } catch (e) {
@@ -170,7 +235,7 @@ export async function fetchEvents(
       liquidity: parseFloat(event.liquidity) || 0,
       active: event.active !== false,
       closed: event.closed === true,
-      category: categorizeMarket(event.title || "", event.description || ""),
+      category: categorizeMarket(event.title || "", event.description || "", event),
       image: event.image,
     }));
   } catch (error) {
@@ -184,7 +249,7 @@ export async function fetchMarkets(
   active: boolean = true
 ): Promise<PolymarketMarket[]> {
   try {
-    const url = `${GAMMA_API}/markets?limit=${limit}&active=${active}&closed=false&order=volume&ascending=false`;
+    const url = `${GAMMA_API}/markets?limit=${limit}&active=${active}&closed=false&order=volume&ascending=false&include_tag=true`;
     log("Fetching markets from:", url);
     
     const response = await fetch(url);
@@ -298,7 +363,7 @@ async function _fetchAllMarketsSingle(
 
   while (page < MAX_PAGES) {
     try {
-      const url = `${GAMMA_API}/markets?limit=${PAGE_SIZE}&offset=${offset}&active=${active}&closed=false&order=volume&ascending=false`;
+      const url = `${GAMMA_API}/markets?limit=${PAGE_SIZE}&offset=${offset}&active=${active}&closed=false&order=volume&ascending=false&include_tag=true`;
       
       // Add timeout to prevent hanging requests (15s per page)
       const controller = new AbortController();
