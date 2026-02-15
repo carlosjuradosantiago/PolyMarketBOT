@@ -1,4 +1,4 @@
-import { Settings, Play, Square, Zap } from "lucide-react";
+import { Settings, Play, Square, Zap, RotateCw } from "lucide-react";
 import { BotStats } from "../types";
 import { useTranslation } from "../i18n";
 import LanguageSelector from "./LanguageSelector";
@@ -10,6 +10,8 @@ interface HeaderProps {
   countdown: number;
   onStart: () => void;
   onStop: () => void;
+  onForceRun: () => void;
+  isManualRunning: boolean;
   onSettings: () => void;
 }
 
@@ -20,12 +22,16 @@ export default function Header({
   countdown,
   onStart,
   onStop,
+  onForceRun,
+  isManualRunning,
   onSettings,
 }: HeaderProps) {
   const fmtCountdown = () => {
     if (countdown <= 0) return "--:--";
-    const m = Math.floor(countdown / 60);
+    const h = Math.floor(countdown / 3600);
+    const m = Math.floor((countdown % 3600) / 60);
     const s = countdown % 60;
+    if (h > 0) return `${h}h${String(m).padStart(2, "0")}m`;
     return `${m}:${String(s).padStart(2, "0")}`;
   };
   const { t } = useTranslation();
@@ -106,6 +112,21 @@ export default function Header({
               {t("header.start")}
             </button>
           )}
+
+          {/* Manual Force-Run Button */}
+          <button
+            onClick={onForceRun}
+            disabled={isManualRunning}
+            title={isManualRunning ? "Ejecutando..." : "Forzar ciclo manual"}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-semibold transition-colors ${
+              isManualRunning
+                ? "bg-yellow-500/10 text-yellow-600 cursor-not-allowed"
+                : "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+            }`}
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${isManualRunning ? "animate-spin" : ""}`} />
+            {isManualRunning ? "Running..." : "Run Now"}
+          </button>
 
           <button
             onClick={onSettings}

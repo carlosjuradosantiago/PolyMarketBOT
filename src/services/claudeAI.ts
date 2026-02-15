@@ -141,7 +141,7 @@ function buildOSINTPrompt(
 
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
-WEB SEARCH: You have web_search (up to 10 uses). STRATEGY:
+WEB SEARCH: You have web_search (up to ${Math.min(shortTermMarkets.length * 5, 100)} uses — 5 per market). STRATEGY:
 1. WEATHER FIRST — weather markets are easiest to verify. Batch nearby cities in one search (e.g. "NWS forecast Chicago NYC Feb 17"). Search ALL weather markets, not just 3-5. Use the official national agency for each country: NWS/NOAA (US), Met Office (UK), Environment Canada (Canada), KMA (Korea), MetService (NZ), BOM (Australia), SMN (Argentina/Mexico), ECMWF/GFS for others. Always cite agency + URL.
 2. Then search remaining non-weather candidates with highest likely edge.
 3. NEVER say "no specific forecast data" for a major city — forecasts exist for every major city. If you don't have search uses left, say "not searched (budget exhausted)" instead of pretending data doesn't exist.
@@ -311,7 +311,7 @@ export async function analyzeMarketsWithClaude(
       model: modelId,
       max_tokens: 4096,
       temperature: 0.3,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: Math.min(shortTermMarkets.length * 5, 100) }],
       messages: [{ role: "user", content: prompt }],
     }),
   });
