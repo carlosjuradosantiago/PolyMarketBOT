@@ -331,14 +331,42 @@ export async function dbResetAICosts(): Promise<void> {
 }
 
 /** Fetch prompt + rawResponse for a single AI history entry (on demand) */
-export async function dbGetAICostDetail(id: number): Promise<{ prompt: string | null; rawResponse: string | null }> {
+export async function dbGetAICostDetail(id: number): Promise<{ prompt: string | null; rawResponse: string | null; skipped: { marketId: string; question: string; reason: string }[] }> {
   const { data, error } = await supabase
     .from("ai_usage_history")
     .select("prompt, raw_response")
     .eq("id", id)
     .single();
-  if (error || !data) return { prompt: null, rawResponse: null };
-  return { prompt: data.prompt || null, rawResponse: data.raw_response || null };
+  if (error || !data) return { prompt: null, rawResponse: null, skipped: [] };
+
+  // Extract skipped array from raw response JSON
+  let skipped: { marketId: string; question: string; reason: string }[] = [];
+  if (data.raw_response) {
+    try {
+      // Try extracting JSON from response (may have preamble text)
+      const raw = data.raw_response as string;
+      const firstBrace = raw.indexOf("{");
+      if (firstBrace >= 0) {
+        let depth = 0, lastBrace = -1;
+        for (let i = firstBrace; i < raw.length; i++) {
+          if (raw[i] === "{") depth++;
+          else if (raw[i] === "}") { depth--; if (depth === 0) { lastBrace = i; break; } }
+        }
+        if (lastBrace > firstBrace) {
+          const parsed = JSON.parse(raw.substring(firstBrace, lastBrace + 1));
+          if (Array.isArray(parsed.skipped)) {
+            skipped = parsed.skipped.map((s: any) => ({
+              marketId: s.marketId || "",
+              question: s.question || "",
+              reason: s.reason || "Sin razón",
+            }));
+          }
+        }
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
+  return { prompt: data.prompt || null, rawResponse: data.raw_response || null, skipped };
 }
 
 // ─── Cycle Logs ───────────────────────────────────────
@@ -361,7 +389,7 @@ export async function dbSaveCycleLog(log: CycleDebugLog): Promise<void> {
   await supabase.from("cycle_logs").insert({
     timestamp: log.timestamp,
     total_markets: log.totalMarkets,
-    pool_breakdown: log.poolBreakdown,
+    pool_breakdown: { ...log.poolBreakdown, skipped: log.skipped },
     short_term_list: log.shortTermList,
     prompt: log.prompt,
     raw_response: log.rawResponse,
@@ -655,10 +683,13 @@ function deserializeOrder(row: any): PaperOrder {
 }
 
 function deserializeCycleLog(row: any): CycleDebugLog {
+  const breakdown = row.pool_breakdown || {};
+  // skipped is stored inside pool_breakdown JSONB to avoid schema migration
+  const skipped = Array.isArray(breakdown.skipped) ? breakdown.skipped : [];
   return {
     timestamp: row.timestamp,
     totalMarkets: row.total_markets,
-    poolBreakdown: row.pool_breakdown || {},
+    poolBreakdown: breakdown,
     shortTermList: row.short_term_list || [],
     prompt: row.prompt || "",
     rawResponse: row.raw_response || "",
@@ -669,6 +700,7 @@ function deserializeCycleLog(row: any): CycleDebugLog {
     responseTimeMs: row.response_time_ms,
     summary: row.summary || "",
     recommendations: row.recommendations,
+    skipped,
     results: row.results || [],
     betsPlaced: row.bets_placed,
     nextScanSecs: row.next_scan_secs,

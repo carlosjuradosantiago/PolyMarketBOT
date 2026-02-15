@@ -164,6 +164,9 @@ MATH (use the side you recommend):
 OUTPUT: Raw JSON only, no code fence.
 {
   "summary": "1-2 lines",
+  "skipped": [
+    {"marketId": "ID", "question": "short", "reason": "brief why (no edge, low confidence, insufficient data, price already fair, etc.)"}
+  ],
   "recommendations": [
     {
       "marketId": "ID from market list",
@@ -184,13 +187,21 @@ OUTPUT: Raw JSON only, no code fence.
     }
   ]
 }
-If nothing qualifies: {"summary":"reason","recommendations":[]}`;
+IMPORTANT: Always include "skipped" array listing ALL markets you did NOT recommend, with a brief reason each.
+If nothing qualifies: {"summary":"reason","skipped":[...],"recommendations":[]}`;
 }
 
 // ─── Types ────────────────────────────────────────────
 
+export interface SkippedMarket {
+  marketId: string;
+  question: string;
+  reason: string;
+}
+
 export interface ClaudeResearchResult {
   analyses: MarketAnalysis[];
+  skipped: SkippedMarket[];
   usage: AIUsage;
   summary: string;
   prompt: string;
@@ -259,6 +270,7 @@ export async function analyzeMarketsWithClaude(
   if (shortTermMarkets.length === 0) {
     return {
       analyses: [],
+      skipped: [],
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, model: modelId, timestamp: localTimestamp() },
       summary: "No hay mercados que venzan en ≤1h para analizar.",
       prompt: "", rawResponse: "", responseTimeMs: 0,
@@ -328,6 +340,7 @@ export async function analyzeMarketsWithClaude(
 
   // ── Parse response FIRST so we can include summary/recommendations in DB ──
   let analyses: MarketAnalysis[] = [];
+  let skippedMarkets: SkippedMarket[] = [];
   let summary = "";
 
   try {
@@ -335,6 +348,16 @@ export async function analyzeMarketsWithClaude(
 
     const parsed = JSON.parse(jsonStr);
     summary = parsed.summary || "";
+
+    // Parse skipped markets
+    if (Array.isArray(parsed.skipped)) {
+      skippedMarkets = parsed.skipped.map((s: any) => ({
+        marketId: s.marketId || "",
+        question: s.question || "",
+        reason: s.reason || "Sin razón",
+      }));
+      log(`📋 Skipped: ${skippedMarkets.length} mercados con razón de rechazo`);
+    }
 
     if (Array.isArray(parsed.recommendations)) {
       analyses = parsed.recommendations
@@ -392,7 +415,7 @@ export async function analyzeMarketsWithClaude(
     console.error("[ClaudeAI] DB cost add failed:", e);
   }
 
-  return { analyses, usage, summary, prompt, rawResponse: content, responseTimeMs: elapsed };
+  return { analyses, skipped: skippedMarkets, usage, summary, prompt, rawResponse: content, responseTimeMs: elapsed };
 }
 
 // ─── Utility ─────────────────────────────────────────

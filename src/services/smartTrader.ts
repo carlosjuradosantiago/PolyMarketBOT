@@ -17,7 +17,7 @@ import {
   KellyResult,
   MarketAnalysis,
 } from "../types";
-import { analyzeMarketsWithClaude, loadCostTracker, formatCost, ClaudeResearchResult, PerformanceHistory } from "./claudeAI";
+import { analyzeMarketsWithClaude, loadCostTracker, formatCost, ClaudeResearchResult, PerformanceHistory, SkippedMarket } from "./claudeAI";
 import {
   JUNK_PATTERNS, JUNK_REGEXES, WEATHER_RE,
   MIN_LIQUIDITY, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
@@ -175,6 +175,7 @@ export interface CycleDebugLog {
   summary: string;
   // Results
   recommendations: number;
+  skipped: SkippedMarket[];
   results: RecommendationResult[];
   betsPlaced: number;
   nextScanSecs: number;
@@ -586,6 +587,7 @@ async function _runSmartCycleInner(
     responseTimeMs: 0,
     summary: "",
     recommendations: 0,
+    skipped: [],
     results: [],
     betsPlaced: 0,
     nextScanSecs: SCAN_INTERVAL_SECS,
@@ -778,12 +780,13 @@ async function _runSmartCycleInner(
       debugLog.responseTimeMs += aiResult.responseTimeMs;
       debugLog.summary = aiResult.summary;
       debugLog.recommendations += aiResult.analyses.length;
+      debugLog.skipped = [...debugLog.skipped, ...aiResult.skipped];
       totalRecommendations += aiResult.analyses.length;
 
       // Mark batch markets as analyzed
       _markAnalyzed(batch.map(m => m.id));
 
-      log(`🔬 ${batchLabel}: ${aiResult.analyses.length} recomendaciones — Costo: ${formatCost(aiResult.usage.costUsd)} (${aiResult.responseTimeMs}ms)`);
+      log(`🔬 ${batchLabel}: ${aiResult.analyses.length} recomendaciones, ${aiResult.skipped.length} descartados — Costo: ${formatCost(aiResult.usage.costUsd)} (${aiResult.responseTimeMs}ms)`);
       log(`💡 ${aiResult.summary}`);
 
       activities.push(activity(
