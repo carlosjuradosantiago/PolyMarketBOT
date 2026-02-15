@@ -88,7 +88,9 @@ export async function dbLoadPortfolio(): Promise<Portfolio> {
     };
   } catch (e) {
     console.error("[DB] Failed to load portfolio:", e);
-    return { ...defaultPortfolio };
+    // CRITICAL: Never return defaultPortfolio on DB failure!
+    // That silently wipes all orders/balance when the network hiccups.
+    throw new Error(`DB portfolio load failed: ${e}`);
   }
 }
 

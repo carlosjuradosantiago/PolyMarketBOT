@@ -15,14 +15,9 @@ import { dbLoadPortfolio, dbSavePortfolio, dbCreateOrder, dbUpdateOrder, dbCance
 
 // ─── Portfolio Management ─────────────────────────────────────────
 
-/** Load from Supabase DB */
+/** Load from Supabase DB — throws on failure (never returns a default that would wipe data) */
 export async function loadPortfolioFromDB(): Promise<Portfolio> {
-  try {
-    return await dbLoadPortfolio();
-  } catch (e) {
-    console.error("[Paper] DB load failed:", e);
-    return { ...defaultPortfolio };
-  }
+  return await dbLoadPortfolio();
 }
 
 /** @deprecated Use loadPortfolioFromDB instead. Kept for sync compatibility. */
