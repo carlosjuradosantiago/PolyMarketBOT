@@ -129,12 +129,23 @@ export function calculateKellyBet(
   const noPrice = prices[1] || (1 - yesPrice);
 
   if (side === "YES") {
+    // Claude reports pReal = P(YES). For YES bet we use it directly.
     pReal = analysis.pReal;
     pMarket = yesPrice;
     outcomeIndex = 0;
     outcomeName = market.outcomes[0] || "Yes";
   } else { // "NO"
-    pReal = 1 - analysis.pReal; // P(No is correct) = 1 - P(Yes)
+    // Claude reports pReal = P(YES). For NO bet we need P(NO) = 1 - P(YES).
+    // Safety: if Claude mistakenly already inverted (pReal < pMarket on a NO trade),
+    // detect and use as-is since it's already the NO probability.
+    const pYes = analysis.pReal;
+    if (pYes < yesPrice && (1 - pYes) > noPrice) {
+      // Claude likely already converted to P(NO) — use directly
+      log(`⚠️ NO trade: pReal ${pYes} < yesPrice ${yesPrice} — using as P(NO) directly`);
+      pReal = pYes;
+    } else {
+      pReal = 1 - pYes; // Normal: convert P(YES) → P(NO)
+    }
     pMarket = noPrice;
     outcomeIndex = 1;
     outcomeName = market.outcomes[1] || "No";

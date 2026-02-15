@@ -154,15 +154,22 @@ ${marketLines}
 
 PROCESS: Scan ALL markets. Pick up to 5 with likely edge. web_search your top candidates. Recommend if edge confirmed.
 
-MATH (use the side you recommend):
-  pReal_YES = your YES probability. If side=YES: pMarket=YES_price, pReal=pReal_YES. If side=NO: pMarket=NO_price, pReal=1-pReal_YES.
-  edge = pReal - pMarket (must be ≥0.08)
+MATH:
+  pReal = ALWAYS your probability that YES happens (regardless of which side you recommend).
+  pMarket = YES price shown above.
+  edge = |pReal - pMarket| (must be ≥0.08)
+  If side=YES: you're betting pReal > pMarket. If side=NO: you're betting pReal < pMarket.
   friction = USE THE Spread SHOWN for each market. Near-expiry(<30min): add +2%.
   Weather with horizon>12h: use LIMIT orders.
   evNet = edge - friction (must be >0)
   kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.25*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
   Confidence ≥60 required. <2 sources → confidence ≤40 → skip.
   LOW VOLUME RULE: if Vol < $3K, cap confidence at 65 max (price more easily manipulated) unless you have direct primary-source data (official government data, NWS forecast, etc.).
+  WEATHER SANITY CHECK: If your forecast says high=X°F/°C and the market asks about a SPECIFIC temperature T:
+    - If T is >5°F/3°C away from forecast: pReal ≤ 0.15 (very unlikely exact hit).
+    - If market asks "≥T" and forecast < T: pReal must reflect that (likely low).
+    - NEVER assign pReal > 0.50 for exact-temperature markets unless forecast is within ±2°F/1°C.
+    - Your reasoning MUST be consistent with the data you found. Do NOT say "forecast shows 4°C" then assign pReal=0.85 for ≥7°C.
   Max 1 per cluster (mutually exclusive markets). Price must be 5¢-95¢.
 
 OUTPUT: Raw JSON only, no code fence.
@@ -177,7 +184,7 @@ OUTPUT: Raw JSON only, no code fence.
       "question": "exact question",
       "category": "weather|politics|geopolitics|entertainment|finance|crypto|other",
       "clusterId": "cluster-id|null",
-      "pMarket": 0.00, "pReal": 0.00, "pLow": 0.00, "pHigh": 0.00,
+      "pMarket": 0.00, "pReal": 0.00, "pLow": 0.00, "pHigh": 0.00,  // pReal/pLow/pHigh = ALWAYS P(YES)
       "edge": 0.00, "friction": 0.00, "evNet": 0.00,
       "confidence": 0,
       "recommendedSide": "YES|NO",
