@@ -235,7 +235,7 @@ export const defaultConfig: BotConfig = {
   min_edge_threshold: 0.10,
   max_concurrent_orders: 10,
   scan_interval_secs: 30,
-  max_expiry_hours: 72,
+  max_expiry_hours: 120,
   auto_trading: true,
   survival_mode: true,
   paper_trading: true,

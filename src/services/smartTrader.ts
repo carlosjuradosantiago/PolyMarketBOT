@@ -31,8 +31,8 @@ import { dbSaveCycleLog, dbUpdateOrder, dbGetStats } from "./db";
 
 // ─── Config ───────────────────────────────────────────
 
-let _maxExpiryMs = 72 * 60 * 60 * 1000;  // Default: 72 hours (configurable)
-const SCAN_INTERVAL_SECS = 600;          // 10 minutes between cycles
+let _maxExpiryMs = 120 * 60 * 60 * 1000;  // Default: 5 days (configurable)
+const SCAN_INTERVAL_SECS = 86400;         // 24 hours between cycles (daily 6am run)
 
 // Minimum liquidity/volume/price thresholds imported from marketConstants.ts
 // (single source of truth shared with polymarket.ts Bot View)
@@ -41,7 +41,7 @@ const SCAN_INTERVAL_SECS = 600;          // 10 minutes between cycles
 // Markets are re-analyzed each cycle because prices/conditions change constantly.
 // ALL state persisted in sessionStorage to survive Vite HMR reloads.
 let _lastClaudeCallTime = Number(sessionStorage.getItem('_smartTrader_lastClaudeCall') || '0');
-const MIN_CLAUDE_INTERVAL_MS = 10 * 60 * 1000;    // HARD minimum: 10 minutes between Claude calls
+const MIN_CLAUDE_INTERVAL_MS = 60 * 60 * 1000;    // HARD minimum: 1 hour between Claude calls (daily schedule)
 
 /** Persist throttle timestamp to sessionStorage (survives HMR, cleared on tab close) */
 function _persistThrottleState() {
@@ -56,7 +56,7 @@ function _persistThrottleState() {
 // TTL MUST match throttle interval — otherwise with a 35-market pool and 30min TTL,
 // cycles 2 & 3 see only 5-8 markets because 30 are still "recently analyzed".
 const ANALYZED_CACHE_KEY = '_smartTrader_analyzedMap';
-const ANALYZED_CACHE_TTL_MS = MIN_CLAUDE_INTERVAL_MS; // = 10 min, same as throttle → every cycle sees full pool
+const ANALYZED_CACHE_TTL_MS = MIN_CLAUDE_INTERVAL_MS; // = 1 hour, prevents rapid re-analysis on manual runs
 
 function _loadAnalyzedMap(): Map<string, number> {
   try {
@@ -708,7 +708,7 @@ async function _runSmartCycleInner(
   // ─── Step 2: Build category-diverse batches ─────────
   // Instead of sending top-30-by-volume (which may all be one category),
   // interleave categories so Claude sees weather + politics + finance + etc.
-  const MAX_POOL_FOR_ANALYSIS = 30;
+  const MAX_POOL_FOR_ANALYSIS = 50;  // Daily run: send more markets per batch
   const fullPool = [...pool]; // keep reference to full pool for market lookup
   const diversified = diversifyPool(pool, pool.length); // reorder, don't truncate yet
 
@@ -717,8 +717,8 @@ async function _runSmartCycleInner(
   for (let i = 0; i < diversified.length; i += MAX_POOL_FOR_ANALYSIS) {
     batches.push(diversified.slice(i, i + MAX_POOL_FOR_ANALYSIS));
   }
-  // Cap total batches per cycle
-  if (batches.length > MAX_BATCHES_PER_CYCLE) batches.length = MAX_BATCHES_PER_CYCLE;
+  const MAX_BATCHES_PER_CYCLE_LOCAL = 3; // Daily run: up to 3 batches of 50 = 150 markets max
+  if (batches.length > MAX_BATCHES_PER_CYCLE_LOCAL) batches.length = MAX_BATCHES_PER_CYCLE_LOCAL;
 
   log(`📦 Pool dividido en ${batches.length} batch(es) de ≤${MAX_POOL_FOR_ANALYSIS} mercados (diversificado por categoría)`);
 

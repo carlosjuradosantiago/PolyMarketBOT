@@ -186,10 +186,13 @@ export default function AIPanel({
         <div className="bg-bot-card rounded-xl border border-bot-border p-4">
           <div className="text-xs text-gray-500 mb-1">{t("ai.nextScan")}</div>
           <div className="text-2xl font-bold text-purple-400">
-            {Math.floor(dynamicInterval / 60)}:{String(dynamicInterval % 60).padStart(2, "0")}
+            {dynamicInterval >= 3600
+              ? `${Math.floor(dynamicInterval / 3600)}h${String(Math.floor((dynamicInterval % 3600) / 60)).padStart(2, "0")}m`
+              : `${Math.floor(dynamicInterval / 60)}:${String(dynamicInterval % 60).padStart(2, "0")}`
+            }
           </div>
           <div className="text-xs text-gray-500 mt-1">
-            {t("ai.dynamicInterval")}
+            Diario 6:00 AM
           </div>
         </div>
       </div>

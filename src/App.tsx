@@ -345,6 +345,21 @@ function App() {
       .catch(e => console.error("[App] DB activity save failed:", e));
   }, [addActivity]);
 
+  // Force-run a cycle manually (bypasses 6am schedule + throttle)
+  const [isManualRunning, setIsManualRunning] = useState(false);
+  const handleForceRun = useCallback(async () => {
+    if (isManualRunning || isAnalyzing) return;
+    setIsManualRunning(true);
+    addActivity("🔧 Ciclo manual forzado por usuario", "Info");
+    // Clear throttle so the cycle runs immediately
+    clearAnalyzedCache();
+    try {
+      await tradingCycleRef.current?.();
+    } finally {
+      setIsManualRunning(false);
+    }
+  }, [isManualRunning, isAnalyzing, addActivity]);
+
   // Reset portfolio — with confirmation dialog
   const handleReset = useCallback(() => {
     const confirmMsg = locale === "es"
@@ -372,6 +387,20 @@ function App() {
   // dynamicIntervalRef is now updated DIRECTLY (synchronously) in tradingCycle — no useEffect needed
 
   // Run trading cycle effect — only depends on isRunning
+  /** Compute seconds until next 6:00 AM UTC-5 (Colombia/EST) */
+  const secondsUntilNext6am = useCallback(() => {
+    const now = new Date();
+    // Convert to UTC-5
+    const utcMs = now.getTime() + now.getTimezoneOffset() * 60_000;
+    const utc5 = new Date(utcMs - 5 * 3600_000);
+    // Next 6am in UTC-5
+    const target = new Date(utc5);
+    target.setHours(6, 0, 0, 0);
+    if (utc5.getHours() >= 6) target.setDate(target.getDate() + 1); // already past 6am → tomorrow
+    const diffMs = target.getTime() - utc5.getTime();
+    return Math.max(60, Math.ceil(diffMs / 1000)); // at least 60s
+  }, []);
+
   useEffect(() => {
     if (!isRunning) {
       if (intervalRef.current) { clearTimeout(intervalRef.current); intervalRef.current = null; }
@@ -380,16 +409,17 @@ function App() {
 
     let cancelled = false;
 
-    // Self-scheduling: run cycle, then wait dynamicInterval, then repeat
+    // Self-scheduling: run cycle, then wait until next 6am
     const scheduleNext = (delaySecs: number) => {
       if (cancelled) return;
       setCountdown(delaySecs);
-      console.log(`[Cycle] Next cycle in ${delaySecs}s`);
+      console.log(`[Cycle] Next cycle in ${delaySecs}s (${(delaySecs/3600).toFixed(1)}h)`);
       intervalRef.current = window.setTimeout(() => {
         if (cancelled) return;
         setCountdown(0); // Clear countdown while cycle runs
         tradingCycleRef.current?.().then(() => {
-          const next = dynamicIntervalRef.current;
+          const next = secondsUntilNext6am();
+          dynamicIntervalRef.current = next;
           if (!cancelled) scheduleNext(next);
         }).catch(() => {
           if (!cancelled) scheduleNext(600); // Retry in 10 min on error
@@ -397,9 +427,10 @@ function App() {
       }, delaySecs * 1000);
     };
 
-    // Run first cycle immediately, then schedule next
+    // Run first cycle immediately, then schedule to next 6am
     tradingCycleRef.current?.().then(() => {
-      const next = dynamicIntervalRef.current;
+      const next = secondsUntilNext6am();
+      dynamicIntervalRef.current = next;
       if (!cancelled) scheduleNext(next);
     }).catch(() => {
       if (!cancelled) scheduleNext(600);
@@ -409,7 +440,7 @@ function App() {
       cancelled = true;
       if (intervalRef.current) { clearTimeout(intervalRef.current); intervalRef.current = null; }
     };
-  }, [isRunning]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isRunning, secondsUntilNext6am]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Countdown timer
   useEffect(() => {
@@ -473,6 +504,8 @@ function App() {
         countdown={countdown}
         onStart={handleStart}
         onStop={handleStop}
+        onForceRun={handleForceRun}
+        isManualRunning={isManualRunning}
         onSettings={() => setShowSettings(true)}
       />
 
@@ -484,7 +517,7 @@ function App() {
             { id: "markets", label: t("tab.markets"), icon: "" },
             { id: "orders", label: t("tab.orders"), icon: "" },
             { id: "ai", label: t("tab.ai"), icon: "" },
-            { id: "console", label: isAnalyzing ? t("tab.analyzing") : `${t("tab.console")} ${countdown > 0 ? `(${Math.floor(countdown/60)}:${String(countdown%60).padStart(2,'0')})` : ""}`, icon: "" },
+            { id: "console", label: isAnalyzing ? t("tab.analyzing") : `${t("tab.console")} ${countdown > 0 ? `(${countdown >= 3600 ? `${Math.floor(countdown/3600)}h${String(Math.floor((countdown%3600)/60)).padStart(2,'0')}m` : `${Math.floor(countdown/60)}:${String(countdown%60).padStart(2,'0')}`})` : ""}`, icon: "" },
           ].map((tab) => (
             <button
               key={tab.id}
