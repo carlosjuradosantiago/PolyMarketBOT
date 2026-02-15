@@ -4,7 +4,7 @@
 import { PolymarketEvent, PolymarketMarket, MarketFilters, TimeframeFilter } from "../types";
 import {
   JUNK_PATTERNS, JUNK_REGEXES, WEATHER_RE,
-  MIN_LIQUIDITY, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
+  MIN_LIQUIDITY_FLOOR, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
   PRICE_FLOOR, PRICE_CEILING,
 } from "./marketConstants";
 
@@ -625,7 +625,7 @@ export function filterMarkets(
       // 6. Min liquidity/volume (weather exception)
       const q = m.question.toLowerCase();
       const isWeather = WEATHER_RE.test(q) && timeLeft > 12 * 60 * 60 * 1000;
-      if (m.liquidity < (isWeather ? WEATHER_MIN_LIQUIDITY : MIN_LIQUIDITY)) return false;
+      if (m.liquidity < (isWeather ? WEATHER_MIN_LIQUIDITY : MIN_LIQUIDITY_FLOOR)) return false;
       if (m.volume < (isWeather ? WEATHER_MIN_VOLUME : MIN_VOLUME)) return false;
       // 7. Price extremes
       const yp = parseFloat(m.outcomePrices[0] || '0.5');
