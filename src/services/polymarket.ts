@@ -1,7 +1,7 @@
 // ─── Polymarket API Service ─────────────────────────────────────────
 // Connects to real Polymarket APIs for market data
 
-import { PolymarketEvent, PolymarketMarket, TimeframeFilter } from "../types";
+import { PolymarketEvent, PolymarketMarket, MarketFilters, TimeframeFilter } from "../types";
 
 // Use Vite proxy to avoid CORS in browser
 const GAMMA_API = "/api/gamma";
@@ -593,14 +593,7 @@ export function filterMarketsByCategory(
 
 export function filterMarkets(
   markets: PolymarketMarket[],
-  filters: {
-    timeframe: TimeframeFilter;
-    category: string;
-    minVolume: number;
-    minLiquidity: number;
-    searchQuery: string;
-    showResolved: boolean;
-  }
+  filters: MarketFilters
 ): PolymarketMarket[] {
   let filtered = markets;
   
@@ -629,7 +622,73 @@ export function filterMarkets(
   if (!filters.showResolved) {
     filtered = filtered.filter(m => !m.resolved);
   }
-  
+
+  // Exclude sports
+  if (filters.excludeSports) {
+    filtered = filtered.filter(m => m.category !== 'sports');
+  }
+
+  // Exclude price extremes (≤2¢ or ≥98¢)
+  if (filters.excludeExtremes) {
+    filtered = filtered.filter(m => {
+      const yp = parseFloat(m.outcomePrices[0] || '0.5');
+      return yp > 0.02 && yp < 0.98;
+    });
+  }
+
+  // Exclude junk/noise markets (same patterns as smartTrader)
+  if (filters.excludeJunk) {
+    const junkPatterns = [
+      "tweet", "tweets", "post on x", "post on twitter", "retweet",
+      "how many", "number of", "followers", "subscribers",
+      "elon musk", "musk post", "musk tweet",
+      "tiktok", "instagram", "youtube video", "viral",
+      "# of ", "#1 free app", "app store", "play store",
+      "chatgpt", "most streamed", "most viewed",
+      "spelling bee", "wordle", "jeopardy", "wheel of fortune",
+    ];
+    filtered = filtered.filter(m => {
+      const q = m.question.toLowerCase();
+      return !junkPatterns.some(j => q.includes(j));
+    });
+  }
+
+  // Bot View: apply ALL smartTrader pre-filters at once
+  if (filters.botView) {
+    const now = Date.now();
+    filtered = filtered.filter(m => {
+      // Must have endDate and not be expired
+      if (!m.endDate) return false;
+      const endTime = new Date(m.endDate).getTime();
+      const timeLeft = endTime - now;
+      if (timeLeft <= 0) return false;
+      if (timeLeft <= 10 * 60 * 1000) return false; // ≤10 min
+      // Exclude sports (API-based category)
+      if (m.category === 'sports') return false;
+      // Min liquidity $200, min volume $300 (weather exception)
+      const q = m.question.toLowerCase();
+      const isWeather = /temperature|°[cf]|weather|rain|snow|hurricane|tornado|forecast|precipitation|storm/.test(q) && timeLeft > 12 * 60 * 60 * 1000;
+      const minLiq = isWeather ? 100 : 200;
+      const minVol = isWeather ? 200 : 300;
+      if (m.liquidity < minLiq || m.volume < minVol) return false;
+      // Price extremes
+      const yp = parseFloat(m.outcomePrices[0] || '0.5');
+      if (yp <= 0.02 || yp >= 0.98) return false;
+      // Junk patterns
+      const junkPatterns = [
+        "tweet", "tweets", "post on x", "post on twitter", "retweet",
+        "how many", "number of", "followers", "subscribers",
+        "elon musk", "musk post", "musk tweet",
+        "tiktok", "instagram", "youtube video", "viral",
+        "# of ", "#1 free app", "app store", "play store",
+        "chatgpt", "most streamed", "most viewed",
+        "spelling bee", "wordle", "jeopardy", "wheel of fortune",
+      ];
+      if (junkPatterns.some(j => q.includes(j))) return false;
+      return true;
+    });
+  }
+
   return filtered;
 }
 

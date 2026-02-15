@@ -148,6 +148,17 @@ const en: { [K in keyof typeof es]: string } = {
   // Volume filters
   "markets.vol.none": "No minimum",
 
+  // Liquidity filters
+  "markets.minLiquidity": "Min Liquidity",
+  "markets.liq.none": "No minimum",
+
+  // Advanced filters
+  "markets.botView": "🤖 Bot View",
+  "markets.botViewDesc": "Same filters sent to Claude",
+  "markets.excludeSports": "🚫 No Sports",
+  "markets.excludeJunk": "🗑️ No Junk",
+  "markets.excludeExtremes": "💀 No Extremes (≤2¢/≥98¢)",
+
   // ─── Orders Panel ─────────────────────────────────
   "orders.tabActive": "Active",
   "orders.tabWon": "Won",

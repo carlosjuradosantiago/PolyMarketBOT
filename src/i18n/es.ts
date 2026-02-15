@@ -146,6 +146,17 @@ const es = {
   // Volume filters
   "markets.vol.none": "Sin mínimo",
 
+  // Liquidity filters
+  "markets.minLiquidity": "Liq. Mínima",
+  "markets.liq.none": "Sin mínimo",
+
+  // Advanced filters
+  "markets.botView": "🤖 Vista Bot",
+  "markets.botViewDesc": "Mismos filtros que envía a Claude",
+  "markets.excludeSports": "🚫 Sin Deportes",
+  "markets.excludeJunk": "🗑️ Sin Junk",
+  "markets.excludeExtremes": "💀 Sin Extremos (≤2¢/≥98¢)",
+
   // ─── Orders Panel ─────────────────────────────────
   "orders.tabActive": "Activas",
   "orders.tabWon": "Ganadas",
