@@ -141,18 +141,21 @@ function buildOSINTPrompt(
 
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
-WEB SEARCH: You have web_search. Use it for your top 3-5 candidates. Search for:
-- Weather: official forecast from the national meteorological agency for that location (e.g. Met Office UK, KMA Korea, Environment Canada, MetService NZ, etc.) OR ECMWF/GFS consensus from reputable hosts. No forecast → skip. For US, use NWS/NOAA/AccuWeather. For other countries, use their official agency. Always cite agency name and URL. Each recommendation needs 1 official + 1 secondary source (or 2 secondary if no official available).
+WEB SEARCH: You have web_search (up to 10 uses). STRATEGY:
+1. WEATHER FIRST — weather markets are easiest to verify. Batch nearby cities in one search (e.g. "NWS forecast Chicago NYC Feb 17"). Search ALL weather markets, not just 3-5. Use the official national agency for each country: NWS/NOAA (US), Met Office (UK), Environment Canada (Canada), KMA (Korea), MetService (NZ), BOM (Australia), SMN (Argentina/Mexico), ECMWF/GFS for others. Always cite agency + URL.
+2. Then search remaining non-weather candidates with highest likely edge.
+3. NEVER say "no specific forecast data" for a major city — forecasts exist for every major city. If you don't have search uses left, say "not searched (budget exhausted)" instead of pretending data doesn't exist.
+4. Each recommendation needs ≥2 dated sources with URLs (1 official + 1 secondary, or 2 secondary).
 - Politics/geopolitics: polls, official statements, vote counts.
-- Other: recent news, official data, expert analysis.
-Each recommendation needs ≥2 dated sources with URLs.
+- Entertainment: box office trackers (BoxOfficeMojo, Numbers), Rotten Tomatoes, streaming charts.
+- Finance: analyst consensus, recent price action, options flow.
 
 BLACKLIST (already own): ${blacklist}
 
 MARKETS (${shortTermMarkets.length}):
 ${marketLines}
 
-PROCESS: Scan ALL markets. Pick up to 5 with likely edge. web_search your top candidates. Recommend if edge confirmed.
+PROCESS: Scan ALL markets. web_search ALL weather markets first (batch cities to save searches). Then search top non-weather candidates. Recommend any with confirmed edge.
 
 MATH:
   pReal = ALWAYS your probability that YES happens (regardless of which side you recommend).
@@ -308,7 +311,7 @@ export async function analyzeMarketsWithClaude(
       model: modelId,
       max_tokens: 4096,
       temperature: 0.3,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }],
       messages: [{ role: "user", content: prompt }],
     }),
   });
