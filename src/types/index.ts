@@ -230,8 +230,8 @@ export const defaultConfig: BotConfig = {
   polymarket_passphrase: "",
   claude_api_key: "",
   claude_model: "claude-sonnet-4-20250514",
-  initial_balance: 100.0,
-  max_bet_size: 25.0,
+  initial_balance: 1500.0,
+  max_bet_size: 150.0,
   min_edge_threshold: 0.10,
   max_concurrent_orders: 10,
   scan_interval_secs: 30,
@@ -242,8 +242,8 @@ export const defaultConfig: BotConfig = {
 };
 
 export const defaultStats: BotStats = {
-  current_balance: 100.0,
-  initial_balance: 100.0,
+  current_balance: 1500.0,
+  initial_balance: 1500.0,
   total_pnl: 0.0,
   total_pnl_pct: "+$0.00",
   api_costs: 0.0,

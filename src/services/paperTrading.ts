@@ -30,7 +30,7 @@ export function savePortfolio(portfolio: Portfolio): void {
   dbSavePortfolio(portfolio).catch(e => console.error("[Paper] DB save failed:", e));
 }
 
-export function resetPortfolio(initialBalance: number = 100): Portfolio {
+export function resetPortfolio(initialBalance: number = 1500): Portfolio {
   const portfolio: Portfolio = {
     balance: initialBalance,
     initialBalance,
