@@ -10,6 +10,7 @@
 
 import { MarketAnalysis, AIUsage, AICostTracker, PaperOrder, PolymarketMarket, defaultAICostTracker } from "../types";
 import { dbLoadCostTracker, dbAddAICost, dbResetAICosts } from "./db";
+import { estimateSpread } from "./marketConstants";
 
 /** Pre-format a Date as local time string so display never needs timezone conversion */
 function localTimestamp(): string {
@@ -116,7 +117,7 @@ function buildOSINTPrompt(
     ? activeOrders.map(o => `  - [ID:${o.marketId}] "${o.marketQuestion.slice(0, 100)}" → ${o.outcome} @ ${(o.price * 100).toFixed(0)}¢`).join("\n")
     : "  (none)";
 
-  // Compact market list
+  // Compact market list — includes estimated spread proxy
   const liqStr = (liq: number) => liq >= 1_000 ? `$${(liq / 1_000).toFixed(0)}K` : `$${liq.toFixed(0)}`;
   const marketLines = shortTermMarkets.map((m, i) => {
     const prices = m.outcomePrices.map(p => parseFloat(p));
@@ -126,7 +127,9 @@ function buildOSINTPrompt(
     const volStr = m.volume >= 1_000_000 ? `$${(m.volume / 1_000_000).toFixed(1)}M`
       : m.volume >= 1_000 ? `$${(m.volume / 1_000).toFixed(0)}K`
       : `$${m.volume.toFixed(0)}`;
-    return `[${i + 1}] "${m.question}" | YES=${(prices[0] * 100).toFixed(0)}¢ NO=${(prices[1] * 100).toFixed(0)}¢ | Vol=${volStr} | Liq=${liqStr(m.liquidity)} | Expires: ${hoursLeft}h (${minLeft}min) | ID:${m.id}`;
+    const spread = estimateSpread(m.liquidity);
+    const spreadStr = `~${(spread * 100).toFixed(1)}%`;
+    return `[${i + 1}] "${m.question}" | YES=${(prices[0] * 100).toFixed(0)}¢ NO=${(prices[1] * 100).toFixed(0)}¢ | Vol=${volStr} | Liq=${liqStr(m.liquidity)} | Spread=${spreadStr} | Expires: ${hoursLeft}h (${minLeft}min) | ID:${m.id}`;
   }).join("\n");
 
   // Performance history line (calibration feedback)
@@ -154,11 +157,12 @@ PROCESS: Scan ALL markets. Pick up to 5 with likely edge. web_search your top ca
 MATH (use the side you recommend):
   pReal_YES = your YES probability. If side=YES: pMarket=YES_price, pReal=pReal_YES. If side=NO: pMarket=NO_price, pReal=1-pReal_YES.
   edge = pReal - pMarket (must be ≥0.08)
-  friction: Liq≥$50K→1.2% | $10-50K→2% | $2-10K→3.5% | <$2K→5%. Near-expiry(<30min): +2%.
-  Weather with horizon>12h: friction=2.5%, use LIMIT orders.
+  friction = USE THE Spread SHOWN for each market. Near-expiry(<30min): add +2%.
+  Weather with horizon>12h: use LIMIT orders.
   evNet = edge - friction (must be >0)
   kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.25*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
   Confidence ≥60 required. <2 sources → confidence ≤40 → skip.
+  LOW VOLUME RULE: if Vol < $3K, cap confidence at 65 max (price more easily manipulated) unless you have direct primary-source data (official government data, NWS forecast, etc.).
   Max 1 per cluster (mutually exclusive markets). Price must be 5¢-95¢.
 
 OUTPUT: Raw JSON only, no code fence.
