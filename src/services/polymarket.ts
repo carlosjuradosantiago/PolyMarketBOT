@@ -300,9 +300,16 @@ async function _fetchAllMarketsSingle(
     try {
       const url = `${GAMMA_API}/markets?limit=${PAGE_SIZE}&offset=${offset}&active=${active}&closed=false&order=volume&ascending=false`;
       
-      const response = await fetch(url);
+      // Add timeout to prevent hanging requests (15s per page)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
       if (!response.ok) {
-        console.warn(`[fetchAllMarkets] HTTP ${response.status} on page ${page + 1}`);
+        const bodySnippet = await response.text().catch(() => "");
+        console.warn(`[fetchAllMarkets] HTTP ${response.status} on page ${page + 1}: ${bodySnippet.slice(0, 200)}`);
         consecutiveErrors++;
         // Allow up to 2 consecutive errors before giving up
         if (consecutiveErrors >= 2) {
@@ -317,6 +324,16 @@ async function _fetchAllMarketsSingle(
       }
 
       consecutiveErrors = 0; // reset on success
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("json")) {
+        console.warn(`[fetchAllMarkets] Non-JSON response on page ${page + 1}: ${contentType}`);
+        consecutiveErrors++;
+        if (consecutiveErrors >= 2) break;
+        offset += PAGE_SIZE;
+        page++;
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
       const data = await response.json();
       if (!Array.isArray(data) || data.length === 0) {
         // Empty page — we've reached the end
@@ -349,8 +366,9 @@ async function _fetchAllMarketsSingle(
       if (page < MAX_PAGES) {
         await new Promise(r => setTimeout(r, 100));
       }
-    } catch (error) {
-      console.error(`[fetchAllMarkets] Error on page ${page + 1}:`, error);
+    } catch (error: any) {
+      const errMsg = error?.name === "AbortError" ? "timeout (15s)" : (error?.message || String(error));
+      console.error(`[fetchAllMarkets] Error on page ${page + 1}: ${errMsg}`);
       consecutiveErrors++;
       if (consecutiveErrors >= 2) {
         console.warn(`[fetchAllMarkets] ${consecutiveErrors} consecutive errors — stopping`);
