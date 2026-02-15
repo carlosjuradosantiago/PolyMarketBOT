@@ -19,10 +19,10 @@ export default async function handler(req, res) {
     const toolNames = (body?.tools || []).map(t => t.type || t.name).join(", ");
     console.log(`[Claude Proxy] model=${model}, tools=[${toolNames}], max_tokens=${body?.max_tokens}`);
 
-    // 115s timeout — leaves headroom within Vercel's 120s maxDuration
-    // web_search can take 60-90s with multiple searches
+    // 295s timeout — leaves headroom within Vercel's 300s maxDuration
+    // web_search can take 60-90s+ with multiple searches
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 115000);
+    const timeout = setTimeout(() => controller.abort(), 295000);
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -52,8 +52,8 @@ export default async function handler(req, res) {
     return res.status(200).json(data);
   } catch (err) {
     if (err.name === "AbortError") {
-      console.error("[Claude Proxy] Request timed out after 115s (web_search may need more time)");
-      return res.status(504).json({ error: "Claude API request timed out (115s). Web search may require more time." });
+      console.error("[Claude Proxy] Request timed out after 295s");
+      return res.status(504).json({ error: "Claude API request timed out (295s)." });
     }
     console.error("[Claude Proxy] Error:", err);
     return res.status(500).json({ error: err.message });
