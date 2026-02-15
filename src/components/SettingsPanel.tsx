@@ -185,7 +185,7 @@ export default function SettingsPanel({
                 <input
                   type="range"
                   min={1}
-                  max={72}
+                  max={168}
                   step={1}
                   value={form.max_expiry_hours}
                   onChange={(e) => updateField("max_expiry_hours", parseFloat(e.target.value))}
@@ -196,7 +196,7 @@ export default function SettingsPanel({
                   <span>12h</span>
                   <span>24h (1d)</span>
                   <span>48h (2d)</span>
-                  <span>72h (3d)</span>
+                  <span>168h (7d)</span>
                 </div>
               </div>
 

@@ -115,7 +115,7 @@ function App() {
 
         console.log("[App] DB state loaded successfully");
         // Apply config to smartTrader (use default 24 if field missing from saved config)
-        setMaxExpiry(config.max_expiry_hours || 24);
+        setMaxExpiry(config.max_expiry_hours || 72);
       } catch (e) {
         console.error("[App] DB load FAILED — keeping current state (NOT resetting):", e);
         // CRITICAL: Do NOT call setPortfolio(defaultPortfolio) here!
