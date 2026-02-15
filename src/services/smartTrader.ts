@@ -20,7 +20,7 @@ import {
 import { analyzeMarketsWithClaude, loadCostTracker, formatCost, ClaudeResearchResult, PerformanceHistory, SkippedMarket } from "./claudeAI";
 import {
   JUNK_PATTERNS, JUNK_REGEXES, WEATHER_RE,
-  MIN_LIQUIDITY, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
+  computeMinLiquidity, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
   PRICE_FLOOR, PRICE_CEILING, computeClusterKey,
 } from "./marketConstants";
 // loadCostTracker is now async (DB-only)
@@ -375,6 +375,7 @@ function buildShortTermPool(
   allMarkets: PolymarketMarket[],
   openOrderMarketIds: Set<string>,
   now: number,
+  bankroll: number,
 ): { pool: PolymarketMarket[]; breakdown: CycleDebugLog["poolBreakdown"] } {
   const bd: CycleDebugLog["poolBreakdown"] = {
     total: allMarkets.length,
@@ -416,10 +417,11 @@ function buildShortTermPool(
     const q = m.question.toLowerCase();
 
     // ═══ HARD LIQUIDITY/VOLUME FILTER ═══
+    // Dynamic: min_liq = max(floor, 100× typical Kelly bet size)
     // Weather exception: thin but high-edge markets with >12h horizon allow lower thresholds
-    // (patient limit orders fill at better prices in these markets)
     const isWeatherMarket = WEATHER_RE.test(q) && timeLeft > 12 * 60 * 60 * 1000;
-    const minLiq = isWeatherMarket ? WEATHER_MIN_LIQUIDITY : MIN_LIQUIDITY;
+    const dynamicMinLiq = computeMinLiquidity(bankroll);
+    const minLiq = isWeatherMarket ? WEATHER_MIN_LIQUIDITY : dynamicMinLiq;
     const minVol = isWeatherMarket ? WEATHER_MIN_VOLUME : MIN_VOLUME;
     if (m.liquidity < minLiq || m.volume < minVol) {
       bd.lowLiquidity++;
@@ -602,7 +604,7 @@ async function _runSmartCycleInner(
 
   // ─── Step 1: Build short-term pool (progressive filters) ──
   const openOrderIds = new Set(portfolio.openOrders.map(o => o.marketId));
-  const { pool, breakdown } = buildShortTermPool(allMarkets, openOrderIds, now);
+  const { pool, breakdown } = buildShortTermPool(allMarkets, openOrderIds, now, portfolio.balance);
   debugLog.poolBreakdown = breakdown;
 
   // Store list for Console Panel

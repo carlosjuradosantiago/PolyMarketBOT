@@ -21,8 +21,8 @@ import { estimateAnalysisCost } from "./claudeAI";
 const KELLY_FRACTION = 0.25;          // Quarter-Kelly for safety
 const MAX_BET_FRACTION = 0.10;        // Never more than 10% of bankroll
 const MIN_BET_USD = 1.00;             // Polymarket platform minimum order size ($1 USDC)
-const MIN_EDGE_AFTER_COSTS = 0.04;    // 4% minimum net edge (relaxed for paper trading)
-const MIN_CONFIDENCE = 55;            // Relaxed for paper trading (matches prompt threshold)
+const MIN_EDGE_AFTER_COSTS = 0.06;    // 6% minimum net edge (after AI costs, before 8% gross)
+const MIN_CONFIDENCE = 60;            // Skip below this confidence (matches prompt threshold)
 const MIN_MARKET_PRICE = 0.02;        // Skip outcomes under 2¢ (lottery tickets — prompt tells AI to avoid <3¢)
 const MAX_MARKET_PRICE = 0.98;        // Skip outcomes over 98¢ (no upside)
 const MIN_RETURN_PCT = 0.03;          // Skip if expected return < 3% (avoids 0% return bets)
