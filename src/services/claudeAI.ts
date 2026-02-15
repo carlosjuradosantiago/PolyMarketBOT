@@ -183,6 +183,21 @@ WEATHER METHOD — deriving probability from forecasts (MANDATORY — DO NOT ski
   5. Your pReal MUST be consistent with μ, σ, and the bin. Show the math briefly.
   6. NEVER say "exact temperature markets too risky" or "forecast X, exact hit unlikely" — ALWAYS compute the bin probability using the formula above.
 
+LEGAL / SCOTUS METHOD — for "Will the Supreme Court rule on X by [date]?" markets:
+  The Supreme Court does NOT pre-announce which opinions come on which day. SCOTUS has ~60 argued cases per term and ~25-30 opinion days (Oct–June). Key rules:
+  1. CHECK the docket: search "scotusblog [case name]" or "supremecourt.gov docket [case number]". Determine: (a) Has the case been ARGUED? (b) When was oral argument? (c) Has an opinion already been issued?
+  2. If not argued yet → probability of ruling by date is near 0%.
+  3. If argued but no opinion yet → estimate probability based on:
+     - Average opinion time: 3-6 months after argument. Median ~4 months.
+     - Big controversial cases (multiple opinions/concurrences/dissents) tend to come LATER in the term (May-June).
+     - Is the Court even in session? Winter recess = mid-Dec through mid-Feb. Summer recess = July onward.
+     - Count remaining opinion days between now and the target date.
+     - P(ruling on specific single day) ≈ 1/(remaining opinion days in term) for typical cases.
+     - P(ruling BY date) ≈ (opinion days between now and target date) / (remaining opinion days in term), adjusted for case complexity.
+  4. NEVER set pReal > 50% for "by [specific date]" unless the opinion day is the LAST of the term or there is concrete evidence (e.g., court has already announced the opinion for that day, or there are very few cases left).
+  5. "Case exists + opinion day exists" ≠ high probability. The market at 10-20% is often correctly priced for these.
+  Example: Tariffs case argued Nov 5, 2025. By Feb 20, 2026 (~3.5 months, first opinion day after winter recess). ~25 opinion days remain. Only 1 opinion day before target. pReal ≈ 15-25%, NOT 85%.
+
 BLACKLIST (already own): ${blacklist}
 
 MARKETS (${shortTermMarkets.length}):
