@@ -97,6 +97,10 @@ export interface MarketFilters {
   minLiquidity: number;
   searchQuery: string;
   showResolved: boolean;
+  excludeJunk: boolean;
+  excludeSports: boolean;
+  excludeExtremes: boolean;  // prices ≤2¢ or ≥98¢
+  botView: boolean;          // apply ALL bot filters at once
 }
 
 export const defaultFilters: MarketFilters = {
@@ -106,6 +110,10 @@ export const defaultFilters: MarketFilters = {
   minLiquidity: 0,
   searchQuery: "",
   showResolved: false,
+  excludeJunk: false,
+  excludeSports: false,
+  excludeExtremes: false,
+  botView: false,
 };
 
 // ─── Paper Trading Types ─────────────────────────────────────────────

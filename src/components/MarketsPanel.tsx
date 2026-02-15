@@ -169,8 +169,8 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        {/* Filters Row 1 */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {/* Timeframe */}
           <div>
             <label className="block text-xs text-gray-500 mb-1">{t("markets.expiry")}</label>
@@ -229,6 +229,27 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
             </select>
           </div>
 
+          {/* Min Liquidity */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">{t("markets.minLiquidity" as any)}</label>
+            <select
+              value={filters.minLiquidity}
+              onChange={(e) =>
+                setFilters({ ...filters, minLiquidity: parseInt(e.target.value) })
+              }
+              className="w-full bg-bot-bg border border-bot-border rounded-lg px-3 py-2 
+                       text-sm text-white focus:border-bot-green outline-none"
+            >
+              <option value={0}>{t("markets.liq.none" as any)}</option>
+              <option value={100}>$100+</option>
+              <option value={200}>$200+</option>
+              <option value={500}>$500+</option>
+              <option value={1000}>$1K+</option>
+              <option value={5000}>$5K+</option>
+              <option value={10000}>$10K+</option>
+            </select>
+          </div>
+
           {/* Search */}
           <div>
             <label className="block text-xs text-gray-500 mb-1">{t("markets.search")}</label>
@@ -241,6 +262,56 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
                        text-sm text-white placeholder-gray-600 focus:border-bot-green outline-none"
             />
           </div>
+        </div>
+
+        {/* Filters Row 2: Toggle filters */}
+        <div className="flex flex-wrap items-center gap-2 mt-2">
+          {/* Bot View — master toggle */}
+          <button
+            onClick={() => setFilters({ ...filters, botView: !filters.botView })}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-all font-medium
+                     ${filters.botView
+                       ? 'bg-bot-green/20 border-bot-green text-bot-green'
+                       : 'bg-bot-bg border-bot-border text-gray-400 hover:border-gray-500'}`}
+            title={t("markets.botViewDesc" as any)}
+          >
+            {t("markets.botView" as any)}
+          </button>
+
+          <div className="w-px h-5 bg-bot-border" />
+
+          {/* Exclude Sports */}
+          <button
+            onClick={() => setFilters({ ...filters, excludeSports: !filters.excludeSports })}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-all
+                     ${filters.excludeSports || filters.botView
+                       ? 'bg-red-500/15 border-red-500/40 text-red-400'
+                       : 'bg-bot-bg border-bot-border text-gray-400 hover:border-gray-500'}`}
+          >
+            {t("markets.excludeSports" as any)}
+          </button>
+
+          {/* Exclude Junk */}
+          <button
+            onClick={() => setFilters({ ...filters, excludeJunk: !filters.excludeJunk })}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-all
+                     ${filters.excludeJunk || filters.botView
+                       ? 'bg-yellow-500/15 border-yellow-500/40 text-yellow-400'
+                       : 'bg-bot-bg border-bot-border text-gray-400 hover:border-gray-500'}`}
+          >
+            {t("markets.excludeJunk" as any)}
+          </button>
+
+          {/* Exclude Extremes */}
+          <button
+            onClick={() => setFilters({ ...filters, excludeExtremes: !filters.excludeExtremes })}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-all
+                     ${filters.excludeExtremes || filters.botView
+                       ? 'bg-purple-500/15 border-purple-500/40 text-purple-400'
+                       : 'bg-bot-bg border-bot-border text-gray-400 hover:border-gray-500'}`}
+          >
+            {t("markets.excludeExtremes" as any)}
+          </button>
         </div>
       </div>
 
