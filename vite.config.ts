@@ -43,7 +43,7 @@ export default defineConfig(async ({ mode }) => {
               const key = env.CLAUDE_API_KEY || env.VITE_CLAUDE_API_KEY;
               if (key) {
                 proxyReq.setHeader("x-api-key", key);
-                proxyReq.setHeader("anthropic-version", "2025-03-05");
+                proxyReq.setHeader("anthropic-version", "2023-06-01");
               }
             });
           },

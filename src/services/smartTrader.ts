@@ -29,9 +29,9 @@ let _maxExpiryMs = 24 * 60 * 60 * 1000;  // Default: 24 hours (configurable)
 const SCAN_INTERVAL_SECS = 600;          // 10 minutes between cycles
 
 // Minimum liquidity and volume to be worth analyzing (filter BEFORE Claude)
-// With $10 bankroll and $1 max bets, even low-liq markets are tradeable.
-const MIN_LIQUIDITY = 500;     // $500 — sufficient depth for $1 limit orders
-const MIN_VOLUME = 1_000;      // $1K — ensures market has some activity
+// With sub-$10 bets, even relatively thin markets are fine for limit orders.
+const MIN_LIQUIDITY = 200;     // $200 — sufficient depth for $1-10 limit orders
+const MIN_VOLUME = 500;        // $500 — ensures market has some activity
 
 // Time throttle: enforce minimum 10 minutes between Claude API calls.
 // Markets are re-analyzed each cycle because prices/conditions change constantly.
