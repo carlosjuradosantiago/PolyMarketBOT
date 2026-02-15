@@ -77,6 +77,18 @@ export function createPaperOrder(
   
   // Calculate cost
   const totalCost = quantity * price;
+
+  // ═══ HARD SAFETY: No single bet can exceed 10% of balance ═══
+  // This is the last-resort guardrail — applies to ALL code paths
+  const MAX_SINGLE_BET_PCT = 0.10;
+  const maxAllowed = portfolio.balance * MAX_SINGLE_BET_PCT;
+  if (totalCost > maxAllowed && totalCost > 15) {
+    return {
+      order: null,
+      portfolio,
+      error: `Bet $${totalCost.toFixed(2)} exceeds 10% of balance ($${maxAllowed.toFixed(2)}). Hard cap enforced.`,
+    };
+  }
   
   // Check balance
   if (totalCost > portfolio.balance) {
