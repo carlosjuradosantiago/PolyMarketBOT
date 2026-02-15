@@ -159,7 +159,7 @@ MATH (use the side you recommend):
   evNet = edge - friction (must be >0)
   kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.25*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
   Confidence ≥60 required. <2 sources → confidence ≤40 → skip.
-  Max 1 per cluster (mutually exclusive markets). Price must be 3¢-97¢.
+  Max 1 per cluster (mutually exclusive markets). Price must be 5¢-95¢.
 
 OUTPUT: Raw JSON only, no code fence.
 {

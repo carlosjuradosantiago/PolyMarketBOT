@@ -160,7 +160,7 @@ const en: { [K in keyof typeof es]: string } = {
   "markets.excludeNearExpiry": "⚡ No <10min",
   "markets.excludeSports": "🚫 No Sports",
   "markets.excludeJunk": "🗑️ No Junk",
-  "markets.excludeExtremes": "💀 No Extremes (≤2¢/≥98¢)",
+  "markets.excludeExtremes": "💀 No Extremes (≤5¢/≥95¢)",
   "markets.excludeOpenOrders": "🔒 No Open Orders",
   "markets.maxExpiry": "Expires in",
   "markets.maxExpiry.none": "No limit",

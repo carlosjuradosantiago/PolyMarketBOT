@@ -158,7 +158,7 @@ const es = {
   "markets.excludeNearExpiry": "⚡ Sin <10min",
   "markets.excludeSports": "🚫 Sin Deportes",
   "markets.excludeJunk": "🗑️ Sin Junk",
-  "markets.excludeExtremes": "💀 Sin Extremos (≤2¢/≥98¢)",
+  "markets.excludeExtremes": "💀 Sin Extremos (≤5¢/≥95¢)",
   "markets.excludeOpenOrders": "🔒 Sin Órdenes Abiertas",
   "markets.maxExpiry": "Expira en",
   "markets.maxExpiry.none": "Sin límite",
