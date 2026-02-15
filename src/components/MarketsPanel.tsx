@@ -221,7 +221,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
           <div>
             <label className="block text-xs text-gray-500 mb-1">{t("markets.minVolume")}</label>
             <select
-              value={filters.botView ? 300 : filters.minVolume}
+              value={filters.botView ? 1000 : filters.minVolume}
               disabled={filters.botView}
               onChange={(e) =>
                 setFilters({ ...filters, minVolume: parseInt(e.target.value) })
@@ -231,9 +231,8 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
                        ${filters.botView ? 'opacity-40 cursor-not-allowed' : ''}`}
             >
               <option value={0}>{t("markets.vol.none")}</option>
-              <option value={200}>$200+</option>
-              <option value={300}>$300+ ⭐</option>
-              <option value={1000}>$1K+</option>
+              <option value={500}>$500+</option>
+              <option value={1000}>$1K+ ⭐</option>
               <option value={5000}>$5K+</option>
               <option value={10000}>$10K+</option>
               <option value={50000}>$50K+</option>
@@ -245,7 +244,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
           <div>
             <label className="block text-xs text-gray-500 mb-1">{t("markets.minLiquidity" as any)}</label>
             <select
-              value={filters.botView ? 200 : filters.minLiquidity}
+              value={filters.botView ? 2000 : filters.minLiquidity}
               disabled={filters.botView}
               onChange={(e) =>
                 setFilters({ ...filters, minLiquidity: parseInt(e.target.value) })
@@ -255,11 +254,11 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
                        ${filters.botView ? 'opacity-40 cursor-not-allowed' : ''}`}
             >
               <option value={0}>{t("markets.liq.none" as any)}</option>
-              <option value={100}>$100+</option>
-              <option value={200}>$200+ ⭐</option>
               <option value={500}>$500+</option>
               <option value={1000}>$1K+</option>
+              <option value={2000}>$2K+ ⭐</option>
               <option value={5000}>$5K+</option>
+              <option value={10000}>$10K+</option>
             </select>
           </div>
 

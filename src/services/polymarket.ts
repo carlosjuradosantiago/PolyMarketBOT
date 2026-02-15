@@ -593,13 +593,29 @@ export function filterMarketsByCategory(
 
 // Junk patterns shared between individual filter and bot view
 const JUNK_PATTERNS = [
+  // Social media noise
   "tweet", "tweets", "post on x", "post on twitter", "retweet",
-  "how many", "number of", "followers", "subscribers",
-  "elon musk", "musk post", "musk tweet",
+  "truth social post", "truth social",
   "tiktok", "instagram", "youtube video", "viral",
   "# of ", "#1 free app", "app store", "play store",
-  "chatgpt", "most streamed", "most viewed",
+  // Follower/subscriber counting
+  "how many", "number of", "followers", "subscribers",
+  "most streamed", "most viewed",
+  // Specific personality noise
+  "elon musk", "musk post", "musk tweet",
+  // Trivial games
   "spelling bee", "wordle", "jeopardy", "wheel of fortune",
+  "chatgpt",
+  // Prop bets Claude can't verify
+  "robot dancer", "robot dance", "have robot",
+  "gala", "spring festival",
+  "fundraiser",
+];
+
+// Regex patterns for complex junk
+const JUNK_REGEXES = [
+  /will .{1,40} say .{1,30} during/,
+  /\d{2,3}-\d{2,3}\s*(posts?|tweets?|times?)/,
 ];
 
 const WEATHER_RE = /temperature|°[cf]|weather|rain|snow|hurricane|tornado|wind speed|heat wave|cold|frost|humidity|celsius|fahrenheit|forecast|precipitation|storm|flood|drought|wildfire|nws|noaa/;
@@ -628,16 +644,17 @@ export function filterMarkets(
       if (timeLeft <= 10 * 60 * 1000) return false;
       // 5. Exclude sports
       if (m.category === 'sports') return false;
-      // 6. Min liquidity/volume (weather exception)
+      // 6. Min liquidity/volume (weather exception: $500 instead of $2K)
       const q = m.question.toLowerCase();
       const isWeather = WEATHER_RE.test(q) && timeLeft > 12 * 60 * 60 * 1000;
-      if (m.liquidity < (isWeather ? 100 : 200)) return false;
-      if (m.volume < (isWeather ? 200 : 300)) return false;
-      // 7. Price extremes
+      if (m.liquidity < (isWeather ? 500 : 2000)) return false;
+      if (m.volume < (isWeather ? 500 : 1000)) return false;
+      // 7. Price extremes (5¢-95¢)
       const yp = parseFloat(m.outcomePrices[0] || '0.5');
-      if (yp <= 0.02 || yp >= 0.98) return false;
+      if (yp <= 0.05 || yp >= 0.95) return false;
       // 8. Junk patterns
       if (JUNK_PATTERNS.some(j => q.includes(j))) return false;
+      if (JUNK_REGEXES.some(r => r.test(q))) return false;
       // 9. No duplicate open orders
       if (openOrderMarketIds && openOrderMarketIds.has(m.id)) return false;
       return true;
@@ -721,11 +738,11 @@ export function filterMarkets(
     filtered = filtered.filter(m => m.category !== 'sports');
   }
 
-  // Exclude price extremes
+  // Exclude price extremes (≤5¢ or ≥95¢)
   if (filters.excludeExtremes) {
     filtered = filtered.filter(m => {
       const yp = parseFloat(m.outcomePrices[0] || '0.5');
-      return yp > 0.02 && yp < 0.98;
+      return yp > 0.05 && yp < 0.95;
     });
   }
 
@@ -733,7 +750,9 @@ export function filterMarkets(
   if (filters.excludeJunk) {
     filtered = filtered.filter(m => {
       const q = m.question.toLowerCase();
-      return !JUNK_PATTERNS.some(j => q.includes(j));
+      if (JUNK_PATTERNS.some(j => q.includes(j))) return false;
+      if (JUNK_REGEXES.some(r => r.test(q))) return false;
+      return true;
     });
   }
 

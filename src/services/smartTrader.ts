@@ -29,9 +29,10 @@ let _maxExpiryMs = 72 * 60 * 60 * 1000;  // Default: 72 hours (configurable)
 const SCAN_INTERVAL_SECS = 600;          // 10 minutes between cycles
 
 // Minimum liquidity and volume to be worth analyzing (filter BEFORE Claude)
-// With sub-$10 bets, even relatively thin markets are fine for limit orders.
-const MIN_LIQUIDITY = 200;     // $200 — sufficient depth for $1-10 limit orders
-const MIN_VOLUME = 300;        // $300 — ensures market has some activity
+// Friction tiers: Liq>=$50K→1.2% | $10-50K→2% | $2-10K→3.5% | <$2K→5%
+// With <$2K liq, 5% friction eats most edges. $2K+ gets 3.5% which is workable.
+const MIN_LIQUIDITY = 2000;    // $2K — keeps friction ≤3.5%, avoids 5% tier
+const MIN_VOLUME = 1000;       // $1K — enough activity to confirm real market interest
 
 // Time throttle: enforce minimum 10 minutes between Claude API calls.
 // Markets are re-analyzed each cycle because prices/conditions change constantly.
@@ -435,32 +436,53 @@ function buildShortTermPool(
     // Weather exception: thin but high-edge markets with >12h horizon allow lower thresholds
     // (patient limit orders fill at better prices in these markets)
     const isWeatherMarket = weatherPatterns.test(q) && timeLeft > 12 * 60 * 60 * 1000;
-    const minLiq = isWeatherMarket ? 100 : MIN_LIQUIDITY;
-    const minVol = isWeatherMarket ? 200 : MIN_VOLUME;
+    const minLiq = isWeatherMarket ? 500 : MIN_LIQUIDITY;
+    const minVol = isWeatherMarket ? 500 : MIN_VOLUME;
     if (m.liquidity < minLiq || m.volume < minVol) {
       bd.lowLiquidity++;
       continue;
     }
 
     // ═══ DE FACTO RESOLVED — prices at extremes, no tradeable edge ═══
-    // Skip markets where YES price is ≤2¢ or ≥98¢ — these waste Claude tokens
+    // Skip markets where YES price is ≤5¢ or ≥95¢
+    // Prompt tells Claude "Price must be 3¢-97¢" but we filter tighter because:
+    // - 3-5¢ markets need 8%+ edge on top of 3.5%+ friction = 11.5%+ actual prob shift
+    // - Claude almost always rejects these = wasted tokens
     const yp = parseFloat(m.outcomePrices[0] || "0.5");
-    if (yp <= 0.02 || yp >= 0.98) {
+    if (yp <= 0.05 || yp >= 0.95) {
       bd.junk++; // count as junk since they're untradeable
       continue;
     }
 
     // ─── Junk / noise (ALWAYS excluded, no progressive) ───
     const junkPatterns = [
+      // Social media noise
       "tweet", "tweets", "post on x", "post on twitter", "retweet",
-      "how many", "number of", "followers", "subscribers",
-      "elon musk", "musk post", "musk tweet",
+      "truth social post", "truth social",
       "tiktok", "instagram", "youtube video", "viral",
       "# of ", "#1 free app", "app store", "play store",
-      "chatgpt", "most streamed", "most viewed",
+      // Follower/subscriber counting
+      "how many", "number of", "followers", "subscribers",
+      "most streamed", "most viewed",
+      // Specific personality noise
+      "elon musk", "musk post", "musk tweet",
+      // Trivial games
       "spelling bee", "wordle", "jeopardy", "wheel of fortune",
+      "chatgpt",
+      // Prop bets Claude can't verify (no public data source)
+      "robot dancer", "robot dance", "have robot",
+      "will .* say ", "say \"" ,  // "will X say Y during Z" — unverifiable speech props
+      "160-179", "180-199", "200-219",  // arbitrary count ranges on posts/actions
+      "gala", "spring festival",  // Chinese TV show props
+      "fundraiser",  // private event speech props
     ];
     if (junkPatterns.some(j => q.includes(j))) { bd.junk++; continue; }
+    // Regex patterns for complex junk detection
+    const junkRegexes = [
+      /will .{1,40} say .{1,30} during/,  // "will X say Y during Z" speech props
+      /\d{2,3}-\d{2,3}\s*(posts?|tweets?|times?)/,  // "160-179 posts" count ranges
+    ];
+    if (junkRegexes.some(r => r.test(q))) { bd.junk++; continue; }
 
     // ─── Skip if already have open order ───
     if (openOrderMarketIds.has(m.id)) { bd.duplicateOpen++; continue; }
