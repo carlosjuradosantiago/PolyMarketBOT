@@ -150,7 +150,6 @@ MARKETS (${shortTermMarkets.length}):
 ${marketLines}
 
 PROCESS: Scan ALL markets. Pick up to 5 with likely edge. web_search your top candidates. Recommend if edge confirmed.
-IMPORTANT: This is PAPER TRADING (simulated). Be MORE aggressive — recommend more markets, accept moderate edges. We need data to calibrate the strategy.
 
 MATH (use the side you recommend):
   pReal_YES = your YES probability. If side=YES: pMarket=YES_price, pReal=pReal_YES. If side=NO: pMarket=NO_price, pReal=1-pReal_YES.
