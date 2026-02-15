@@ -305,9 +305,11 @@ const politicsPatterns = /trump|biden|harris|congress|senate|house of rep|electi
 const geopoliticsPatterns = /war|military|invasion|nato|united nations|\bun\b|sanction|tariff|trade war|ceasefire|peace deal|treaty|summit|nuclear|missile|refugee|occupation|annexation/;
 const entertainmentPatterns = /oscar|grammy|emmy|movie|film|box office|album|song|concert|tv show|series|streaming|netflix|disney|spotify|billboard|ratings|premiere|celebrity|award/;
 
-function classifyMarketCategory(question: string): string {
-  const q = question.toLowerCase();
-  if (isSportsMarket(q)) return 'sports';
+function classifyMarketCategory(market: PolymarketMarket): string {
+  // Use the API-derived category first (set by categorizeMarket() during fetch)
+  if (market.category === 'sports') return 'sports';
+
+  const q = market.question.toLowerCase();
   if (cryptoPatterns.some(p => q.includes(p))) return 'crypto';
   if (stockPatterns.some(p => q.includes(p))) return 'finance';
   if (weatherPatterns.test(q)) return 'weather';
@@ -328,7 +330,7 @@ const CATEGORY_PRIORITY = ['weather', 'politics', 'geopolitics', 'entertainment'
 function diversifyPool(markets: PolymarketMarket[], maxSize: number): PolymarketMarket[] {
   const buckets = new Map<string, PolymarketMarket[]>();
   for (const m of markets) {
-    const cat = classifyMarketCategory(m.question);
+    const cat = classifyMarketCategory(m);
     if (!buckets.has(cat)) buckets.set(cat, []);
     buckets.get(cat)!.push(m);
   }
@@ -358,65 +360,6 @@ function diversifyPool(markets: PolymarketMarket[], maxSize: number): Polymarket
     round++;
   }
   return result;
-}
-
-/** Sports / betting patterns — simple string inclusion */
-const sportsPatterns = [
-  // ── Sport names ──
-  "nba", "nfl", "mlb", "nhl", "soccer", "football", "basketball", "baseball",
-  "hockey", "tennis", "golf", "f1", "formula 1", "ufc", "mma", "boxing",
-  // ── Leagues ──
-  "premier league", "la liga", "serie a", "bundesliga", "champions league",
-  "world cup", "copa america", "euros 2024", "super bowl", "playoffs",
-  "grand slam", "wimbledon", "us open", "french open", "australian open",
-  "eredivisie", "ligue 1", "serie b", "mls", "liga mx", "a-league",
-  "wnba", "ncaa", "college football", "march madness",
-  "atp", "wta", "pga", "lpga", "nascar", "indycar",
-  "scottish premiership", "championship", "league one", "league two",
-  // ── Common sports phrases ──
-  "win the", "win against", "beat the", "defeat", "clinch",
-  "mvp", "ballon d'or", "touchdown", "home run", "goal scored",
-  "match", "game 1", "game 2", "game 3", "game 4", "game 5", "game 6", "game 7",
-  // ── Betting market formats (catches most Polymarket sports) ──
-  "end in a draw", "o/u ", "over/under", "spread:",
-  "both teams to score", "total goals", "total points", "total runs",
-  "map handicap", "handicap:", "moneyline",
-  // ── Head-to-head format ──
-  " vs ", " vs.",
-  // ── Esports titles ──
-  "call of duty", "valorant", "counter-strike", "cs2", "csgo", "cs:go",
-  "league of legends", "dota 2", "overwatch", "rocket league",
-  "fortnite", "apex legends", "rainbow six", "halo infinite",
-  "starcraft", "pubg", "free fire", "mobile legends",
-  "cod league", "cod:", "esports", "e-sports",
-  // ── Esports formats ──
-  "(bo5)", "(bo3)", "(bo7)", "bo5)", "bo3)", "bo7)",
-  "best of 3", "best of 5", "best of 7",
-];
-
-/**
- * Regex patterns for sports — catches format-based patterns that simple includes() misses.
- * e.g. "Will X win on 2026-02-15?" (specific date = sports scheduling)
- */
-const sportsRegexPatterns = [
-  /\bwin on 20\d{2}-\d{2}-\d{2}\b/,   // "Will X win on YYYY-MM-DD?" — almost always sports
-  /\b(?:fc|cf|sc|afc|rfc|fk|sk|bk)\b/, // Club suffixes: FC, CF, SC, AFC, etc.
-  /\bcalcio\b/,                          // Italian football
-  /\bunited\b/,                          // Manchester United, Newcastle United, etc.
-  /\brovers?\b/,                         // Blackburn Rovers, etc.
-  /\brangers?\b/,                        // Rangers FC, etc.
-  /\bcity\s+(?:fc|vs|$)/,               // "Stoke City FC", "City vs X"
-  /\breal\s+(?:madrid|betis|sociedad|valladolid|zaragoza|oviedo)\b/,
-  /\bathletic\s+(?:club|bilbao)\b/,
-  /\bsporting\s+(?:cp|lisbon|gijon|kc)\b/,
-  /\binter\s+(?:miami|milan|milan)\b/,
-];
-
-/** Check if a question is sports/esports */
-function isSportsMarket(q: string): boolean {
-  if (sportsPatterns.some(p => q.includes(p))) return true;
-  if (sportsRegexPatterns.some(r => r.test(q))) return true;
-  return false;
 }
 
 /** Crypto / DeFi patterns */
@@ -523,8 +466,9 @@ function buildShortTermPool(
     if (openOrderMarketIds.has(m.id)) { bd.duplicateOpen++; continue; }
 
     // ─── Classify into content buckets ───
-    // Sports/esports permanently excluded — Claude can't find live odds, wastes tokens
-    if (isSportsMarket(q)) {
+    // Sports/esports excluded via market.category (set from Polymarket API data:
+    // sportsMarketType, tags[], categories[], gameId, teamAID, teamBID)
+    if (m.category === 'sports') {
       bd.sports++;
       continue;
     } else if (cryptoPatterns.some(p => q.includes(p))) {
