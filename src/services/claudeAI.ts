@@ -138,27 +138,27 @@ function buildOSINTPrompt(
 
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
-WEB SEARCH: You have web_search. Use it for your top 2-3 candidates. Search for:
+WEB SEARCH: You have web_search. Use it for your top 3-5 candidates. Search for:
 - Weather: official forecast (NWS/NOAA/AccuWeather). No forecast → skip.
 - Politics/geopolitics: polls, official statements, vote counts.
 - Other: recent news, official data, expert analysis.
-Each recommendation needs ≥2 dated sources with URLs.
+Each recommendation needs ≥1 credible source (URL preferred).
 
 BLACKLIST (already own): ${blacklist}
 
 MARKETS (${shortTermMarkets.length}):
 ${marketLines}
 
-PROCESS: Mentally scan all markets. Pick 2-3 with likely edge. web_search those. Recommend if edge confirmed.
+PROCESS: Scan ALL markets. Pick up to 5 with likely edge. web_search your top candidates. Recommend if edge confirmed.
+IMPORTANT: This is PAPER TRADING (simulated). Be MORE aggressive — recommend more markets, accept moderate edges. We need data to calibrate the strategy.
 
 MATH (use the side you recommend):
   pReal_YES = your YES probability. If side=YES: pMarket=YES_price, pReal=pReal_YES. If side=NO: pMarket=NO_price, pReal=1-pReal_YES.
-  edge = pReal - pMarket (must be ≥0.08)
-  friction: Liq≥$50K→1.2% | $10-50K→2% | $2-10K→3.5% | <$2K→5%. Near-expiry(<30min): +2%.
-  Weather with horizon>12h: friction=2.5%, use LIMIT orders.
+  edge = pReal - pMarket (must be ≥0.05)
+  friction: Liq≥$50K→0.5% | $10-50K→1% | $2-10K→1.5% | <$2K→2.5%. Near-expiry(<30min): +1%.
   evNet = edge - friction (must be >0)
   kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.25*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
-  Confidence ≥60 required. <2 sources → confidence ≤40 → skip.
+  Confidence ≥55 required. 1 credible source is enough if authoritative (NWS, official data, polls).
   Max 1 per cluster (mutually exclusive markets). Price must be 5¢-95¢.
 
 OUTPUT: Raw JSON only, no code fence.
