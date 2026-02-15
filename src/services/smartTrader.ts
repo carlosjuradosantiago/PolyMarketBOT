@@ -149,14 +149,14 @@ export interface CycleDebugLog {
     resolved: number;
     tooFarOut: number;
     junk: number;
-    sports: number;         // excluded sports (0 if included via progressive relaxation)
-    crypto: number;         // excluded crypto/finance
-    stocks: number;         // excluded stocks/indices
+    sports: number;         // always excluded (Claude can't verify bookmaker odds)
+    crypto: number;         // excluded crypto/finance (0 if included via progressive relaxation)
+    stocks: number;         // excluded stocks/indices (0 if included via progressive relaxation)
     duplicateOpen: number;
     lowLiquidity: number;
     passed: number;
-    filterLevel: number;    // 0=strict, 1=+sports, 2=+crypto, 3=+stocks
-    filterLabel: string;    // Human label: "Estricto", "+Deportes", etc.
+    filterLevel: number;    // 0=strict, 1=+crypto, 2=+crypto+stocks
+    filterLabel: string;    // Human label: "Estricto", "+Crypto", etc.
   };
   shortTermList: { question: string; endDate: string; volume: number; yesPrice: number }[];
   // AI
@@ -294,7 +294,7 @@ function computeClusterKey(question: string): string {
 /** Minimum pool size before we start relaxing content filters */
 const MIN_POOL_TARGET = 15;
 
-const FILTER_LEVEL_LABELS = ["Estricto", "+Deportes", "+Deportes+Crypto", "Todo (sin junk)"];
+const FILTER_LEVEL_LABELS = ["Estricto", "+Crypto", "+Crypto+Stocks", "Todo (sin junk)"];
 
 /** Max batches per cycle — if 0 bets placed, try next batch immediately */
 const MAX_BATCHES_PER_CYCLE = 3;
@@ -322,8 +322,8 @@ function classifyMarketCategory(question: string): string {
  * Within each category, markets are sorted by volume (best first).
  * This ensures the batch sent to Claude has diverse topics.
  */
-/** Priority order: non-sports categories first (LLM has better edge there) */
-const CATEGORY_PRIORITY = ['weather', 'politics', 'geopolitics', 'entertainment', 'other', 'finance', 'crypto', 'sports'];
+/** Priority order for pool diversification */
+const CATEGORY_PRIORITY = ['weather', 'politics', 'geopolitics', 'entertainment', 'other', 'finance', 'crypto'];
 
 function diversifyPool(markets: PolymarketMarket[], maxSize: number): PolymarketMarket[] {
   const buckets = new Map<string, PolymarketMarket[]>();
@@ -341,10 +341,6 @@ function diversifyPool(markets: PolymarketMarket[], maxSize: number): Polymarket
     if (!categories.includes(c)) categories.push(c);
   }
 
-  // Cap sports at 40% of maxSize to leave room for higher-edge categories
-  const sportsCap = Math.floor(maxSize * 0.4);
-  let sportsCount = 0;
-
   const result: PolymarketMarket[] = [];
   let round = 0;
 
@@ -353,9 +349,7 @@ function diversifyPool(markets: PolymarketMarket[], maxSize: number): Polymarket
     for (const cat of categories) {
       const arr = buckets.get(cat)!;
       if (round < arr.length) {
-        if (cat === 'sports' && sportsCount >= sportsCap) continue;
         result.push(arr[round]);
-        if (cat === 'sports') sportsCount++;
         added = true;
         if (result.length >= maxSize) break;
       }
@@ -429,9 +423,8 @@ function buildShortTermPool(
   };
 
   // ── Phase 1: Apply base filters (always enforced) ──
-  // Separate markets into: clean, sports, crypto, stocks (all passing base filters)
+  // Separate markets into: clean, crypto, stocks (sports permanently excluded)
   const clean: PolymarketMarket[] = [];
-  const sportsBucket: PolymarketMarket[] = [];
   const cryptoBucket: PolymarketMarket[] = [];
   const stocksBucket: PolymarketMarket[] = [];
 
@@ -486,8 +479,10 @@ function buildShortTermPool(
     if (openOrderMarketIds.has(m.id)) { bd.duplicateOpen++; continue; }
 
     // ─── Classify into content buckets ───
+    // Sports/esports permanently excluded — Claude can't find live odds, wastes tokens
     if (sportsPatterns.some(p => q.includes(p))) {
-      sportsBucket.push(m);
+      bd.sports++;
+      continue;
     } else if (cryptoPatterns.some(p => q.includes(p))) {
       cryptoBucket.push(m);
     } else if (stockPatterns.some(p => q.includes(p))) {
@@ -498,34 +493,27 @@ function buildShortTermPool(
   }
 
   // Initialize counts as "excluded"
-  bd.sports = sportsBucket.length;
   bd.crypto = cryptoBucket.length;
   bd.stocks = stocksBucket.length;
 
   // ── Phase 2: Progressive relaxation ──
   // Start strict, add categories until pool >= MIN_POOL_TARGET
+  // Sports are NEVER included (Claude can't verify bookmaker odds → 100% rejection)
   const pool = [...clean];
   let level = 0;
-
-  if (pool.length < MIN_POOL_TARGET && sportsBucket.length > 0) {
-    pool.push(...sportsBucket);
-    bd.sports = 0;   // no longer excluded
-    level = 1;
-    log(`  📈 Filtro progresivo → Nivel 1: +${sportsBucket.length} deportes (pool era ${clean.length})`);
-  }
 
   if (pool.length < MIN_POOL_TARGET && cryptoBucket.length > 0) {
     pool.push(...cryptoBucket);
     bd.crypto = 0;
-    level = 2;
-    log(`  📈 Filtro progresivo → Nivel 2: +${cryptoBucket.length} crypto (pool era ${pool.length - cryptoBucket.length})`);
+    level = 1;
+    log(`  📈 Filtro progresivo → Nivel 1: +${cryptoBucket.length} crypto (pool era ${pool.length - cryptoBucket.length})`);
   }
 
   if (pool.length < MIN_POOL_TARGET && stocksBucket.length > 0) {
     pool.push(...stocksBucket);
     bd.stocks = 0;
-    level = 3;
-    log(`  📈 Filtro progresivo → Nivel 3: +${stocksBucket.length} stocks/finance (pool era ${pool.length - stocksBucket.length})`);
+    level = 2;
+    log(`  📈 Filtro progresivo → Nivel 2: +${stocksBucket.length} stocks/finance (pool era ${pool.length - stocksBucket.length})`);
   }
 
   bd.filterLevel = level;
@@ -733,7 +721,7 @@ async function _runSmartCycleInner(
 
   // ─── Step 2: Build category-diverse batches ─────────
   // Instead of sending top-30-by-volume (which may all be one category),
-  // interleave categories so Claude sees weather + politics + sports + etc.
+  // interleave categories so Claude sees weather + politics + finance + etc.
   const MAX_POOL_FOR_ANALYSIS = 30;
   const fullPool = [...pool]; // keep reference to full pool for market lookup
   const diversified = diversifyPool(pool, pool.length); // reorder, don't truncate yet

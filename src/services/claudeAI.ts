@@ -138,10 +138,10 @@ function buildOSINTPrompt(
 
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
-WEB SEARCH: You have web_search. Use it ONLY for your top 2-3 candidates (save tokens). Search for:
-- Sports: bookmaker odds (Pinnacle/Betfair/DraftKings). No odds found → skip.
+WEB SEARCH: You have web_search. Use it for your top 2-3 candidates. Search for:
 - Weather: official forecast (NWS/NOAA/AccuWeather). No forecast → skip.
-- Other: recent news, polls, official data.
+- Politics/geopolitics: polls, official statements, vote counts.
+- Other: recent news, official data, expert analysis.
 Each recommendation needs ≥2 dated sources with URLs.
 
 BLACKLIST (already own): ${blacklist}
@@ -153,12 +153,12 @@ PROCESS: Mentally scan all markets. Pick 2-3 with likely edge. web_search those.
 
 MATH (use the side you recommend):
   pReal_YES = your YES probability. If side=YES: pMarket=YES_price, pReal=pReal_YES. If side=NO: pMarket=NO_price, pReal=1-pReal_YES.
-  edge = pReal - pMarket (must be ≥0.08, sports ≥0.12)
+  edge = pReal - pMarket (must be ≥0.08)
   friction: Liq≥$50K→1.2% | $10-50K→2% | $2-10K→3.5% | <$2K→5%. Near-expiry(<30min): +2%.
   Weather with horizon>12h: friction=2.5%, use LIMIT orders.
   evNet = edge - friction (must be >0)
   kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.25*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
-  Confidence ≥60 required (sports ≥65). <2 sources → confidence ≤40 → skip.
+  Confidence ≥60 required. <2 sources → confidence ≤40 → skip.
   Max 1 per cluster (mutually exclusive markets). Price must be 3¢-97¢.
 
 OUTPUT: Raw JSON only, no code fence.
@@ -168,7 +168,7 @@ OUTPUT: Raw JSON only, no code fence.
     {
       "marketId": "ID from market list",
       "question": "exact question",
-      "category": "sports|weather|politics|other",
+      "category": "weather|politics|geopolitics|entertainment|finance|crypto|other",
       "clusterId": "cluster-id|null",
       "pMarket": 0.00, "pReal": 0.00, "pLow": 0.00, "pHigh": 0.00,
       "edge": 0.00, "friction": 0.00, "evNet": 0.00,
@@ -237,7 +237,7 @@ export async function analyzeMarketsWithClaude(
       model: modelId,
       max_tokens: 4096,
       temperature: 0.3,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
       messages: [{ role: "user", content: prompt }],
     }),
   });
