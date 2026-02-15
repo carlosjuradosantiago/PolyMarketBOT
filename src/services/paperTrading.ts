@@ -73,24 +73,26 @@ export function createPaperOrder(
   // Calculate cost
   const totalCost = quantity * price;
 
-  // ═══ HARD SAFETY: No single bet can exceed 10% of balance ═══
-  // This is the last-resort guardrail — applies to ALL code paths
+  // ═══ HARD SAFETY: No single bet can exceed 10% of EQUITY ═══
+  // Equity = cash balance + money invested in open orders (same as Kelly sizing)
+  const investedInOrders = portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
+  const equity = portfolio.balance + investedInOrders;
   const MAX_SINGLE_BET_PCT = 0.10;
-  const maxAllowed = portfolio.balance * MAX_SINGLE_BET_PCT;
+  const maxAllowed = equity * MAX_SINGLE_BET_PCT;
   if (totalCost > maxAllowed && totalCost > 15) {
     return {
       order: null,
       portfolio,
-      error: `Bet $${totalCost.toFixed(2)} exceeds 10% of balance ($${maxAllowed.toFixed(2)}). Hard cap enforced.`,
+      error: `Bet $${totalCost.toFixed(2)} exceeds 10% of equity ($${maxAllowed.toFixed(2)}). Hard cap enforced.`,
     };
   }
   
-  // Check balance
+  // Check available cash
   if (totalCost > portfolio.balance) {
     return {
       order: null,
       portfolio,
-      error: `Insufficient balance. Need $${totalCost.toFixed(2)}, have $${portfolio.balance.toFixed(2)}`,
+      error: `Insufficient cash balance. Need $${totalCost.toFixed(2)}, have $${portfolio.balance.toFixed(2)} (equity $${equity.toFixed(2)})`,
     };
   }
   
@@ -409,10 +411,13 @@ export async function autoPlaceOrders(
     
     if (opportunity) {
       // Calculate bet size (Kelly-inspired, but conservative)
+      const investedInOrdersAR = currentPortfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
+      const equityAR = currentPortfolio.balance + investedInOrdersAR;
       const betSize = Math.min(
         config.maxBetSize,
-        currentPortfolio.balance * 0.1, // Max 10% of balance per bet
-        opportunity.edge * currentPortfolio.balance * 2 // Edge-based sizing
+        equityAR * 0.1, // Max 10% of equity per bet
+        currentPortfolio.balance, // Can't exceed available cash
+        opportunity.edge * equityAR * 2 // Edge-based sizing
       );
       
       if (betSize < 1) continue; // Minimum $1 bet
