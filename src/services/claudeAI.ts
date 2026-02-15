@@ -144,7 +144,7 @@ UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 WEB SEARCH: You have web_search (up to ${Math.min(shortTermMarkets.length * 5, 100)} uses — 5 per market). STRATEGY:
 1. WEATHER FIRST — weather markets are easiest to verify. Search ALL weather markets. Batch nearby cities in one search (e.g. "NWS forecast Chicago NYC Feb 17").
 2. Then search remaining non-weather candidates with highest likely edge.
-3. NEVER say "no specific forecast data" or "no exact forecast" for a major city — forecasts exist for EVERY major city. You do NOT need an exact-degree forecast. You need the forecast HIGH (or hourly max) and then DERIVE the probability (see WEATHER METHOD below). If you don't have search uses left, say "not searched (budget exhausted)".
+3. NEVER say "no specific forecast data" or "no exact forecast" for a major city — forecasts exist for EVERY major city. You do NOT need an exact-degree forecast. You need the forecast HIGH (or hourly max) and then DERIVE the probability (see WEATHER METHOD below). If official site is blocked/inaccessible, say "official not accessible" and use 2 secondary sources (AccuWeather/Weather.com/Windy/TimeAndDate) with date. If no searches left, say "not searched (budget exhausted)".
 4. Each recommendation needs ≥2 dated sources with URLs (1 official + 1 secondary, or 2 secondary).
 - Politics/geopolitics: polls, official statements, vote counts.
 - Entertainment: box office trackers (BoxOfficeMojo, Numbers), Rotten Tomatoes, streaming charts.
@@ -165,7 +165,8 @@ WEATHER SEARCH PROTOCOL (mandatory per country):
   Other: search "[national weather agency] [city] forecast [date]"
   FALLBACK: If official source fails, allow 1 official + 1 secondary (AccuWeather/Windy/Weather.com/TimeAndDate).
 
-WEATHER METHOD — deriving probability from forecasts (DO NOT require "exact X° forecast"):
+WEATHER METHOD — deriving probability from forecasts (MANDATORY — DO NOT skip weather markets):
+  You do NOT need an "exact X° forecast". You need the forecast HIGH (or hourly max) and then DERIVE probability.
   1. Get the forecast HIGH (or hourly max for the target day) = μ (mean expected).
   2. Determine uncertainty σ by forecast horizon:
      <24h: σ ≈ 2°F (≈1.1°C)
@@ -173,11 +174,14 @@ WEATHER METHOD — deriving probability from forecasts (DO NOT require "exact X�
      48–72h: σ ≈ 4°F (≈2.2°C)
      >72h: σ ≈ 5°F (≈2.8°C)
   3. For market types, compute pReal:
-     "exactly X°C" → bin [X-0.5, X+0.5]. pReal = P(temp in bin) ≈ (1/σ√2π) × e^(-(X-μ)²/2σ²). In practice: if |X-μ| < σ → pReal ≈ 0.25-0.40; if |X-μ| ≈ σ → pReal ≈ 0.10-0.20; if |X-μ| > 2σ → pReal < 0.05.
-     "X–Y°F" (2°F bin) → same as above but for bin [X, Y]. Wider bin = higher pReal.
-     "≥T" or "≤T" → pReal = Φ((μ-T)/σ) for ≥T, or Φ((T-μ)/σ) for ≤T. If μ is 5°F above T → pReal ≈ 0.95+. If μ is 2°F below T → pReal ≈ 0.15.
-  4. NARROW BIN EDGE RULE: For 1°F/1°C bins where YES price is 10¢-40¢, only recommend if forecast μ is >6°F/3°C away from the bin (bet NO). Otherwise the bin is too noisy — skip.
-  5. Your pReal MUST be mathematically consistent with μ, σ, and the bin. Show the math briefly in reasoning.
+     "exactly X°C" → bin [X-0.5, X+0.5]. pReal ≈ P(temp in bin).
+     "X–Y°F" (2°F bin) → bin [X, Y]. pReal = Φ((Y-μ)/σ) − Φ((X-μ)/σ).
+     "≥T" → pReal = Φ((μ-T)/σ). If μ is 5°F above T → ~0.95. If μ is 2°F below T → ~0.15.
+     "≤T" → pReal = Φ((T-μ)/σ).
+     Quick reference (|X-μ| in σ units): 0σ→~0.40 per 1°F bin, 1σ→~0.24, 2σ→~0.05, 3σ→~0.01.
+  4. NARROW BIN EDGE RULE: For 1°F/1°C bins where YES price is 10¢-40¢, only recommend if forecast μ is >6°F/3°C away from the bin (bet NO). Otherwise too noisy — skip.
+  5. Your pReal MUST be consistent with μ, σ, and the bin. Show the math briefly.
+  6. NEVER say "exact temperature markets too risky" or "forecast X, exact hit unlikely" — ALWAYS compute the bin probability using the formula above.
 
 BLACKLIST (already own): ${blacklist}
 
@@ -190,7 +194,7 @@ MATH:
   pReal = ALWAYS your probability that YES happens (regardless of which side you recommend).
   pMarket = YES price shown above.
   edge = |pReal - pMarket| (must be ≥ minEdge for that market).
-  minEdge = max(0.06, 2*spread) (conservador) o max(0.05, 1.5*spread) (más jugable). Ejemplo: spread 8% → minEdge 12% (conservador) o 10% (jugable).
+  minEdge = max(0.06, spread + 0.04). Ejemplo: spread 8% → minEdge 12%. spread 3% → minEdge 7%. spread 15% → minEdge 19%.
   If side=YES: you're betting pReal > pMarket. If side=NO: you're betting pReal < pMarket.
   friction = USE THE Spread SHOWN for each market. Near-expiry(<30min): add +2%.
   Weather with horizon>12h: use LIMIT orders.
@@ -198,12 +202,13 @@ MATH:
   kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.25*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
   Confidence ≥60 required. <2 sources → confidence ≤40 → skip.
   LOW VOLUME RULE: if Vol < $3K, cap confidence at 65 max (price more easily manipulated) unless you have direct primary-source data (official government data, NWS forecast, etc.).
-  WEATHER: Use the WEATHER METHOD above to derive pReal from forecast. Do NOT require exact-degree forecasts. Do NOT skip weather markets saying "no specific forecast data" — derive pReal from forecast HIGH + uncertainty σ.
+  WEATHER: Use the WEATHER METHOD above to derive pReal from forecast. ALWAYS compute bin probability — do NOT skip weather markets saying "no specific forecast data", "exact temperature too risky", or "spread too wide for confidence". Derive pReal from forecast HIGH + uncertainty σ and let the math decide.
   Max 1 per cluster (mutually exclusive markets). Price must be 5¢-95¢.
 
 CRITICAL RULES:
-  - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL and verified it in THIS session. Hallucinating resolution data is FORBIDDEN. If you haven't verified, treat the market as unresolved.
-  - NEVER skip a weather market saying "no specific forecast data" — use the WEATHER METHOD with forecast HIGH + σ.
+  - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL and verified it in THIS session with web_search. Hallucinating resolution data is FORBIDDEN. If you haven't verified with a URL, treat the market as unresolved.
+  - NEVER skip a weather market saying "no specific forecast data" or "exact temperature too risky" — ALWAYS use the WEATHER METHOD with forecast HIGH + σ to compute bin probability.
+  - NEVER say "insufficient forecast data" for a well-known city — every major city has forecasts. Search for them.
   - For entertainment/box office: only claim resolved if you found the actual data via web_search with a URL. Weekend estimates ≠ final results.
 
 OUTPUT: Raw JSON only, no code fence.

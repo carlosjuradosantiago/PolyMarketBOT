@@ -44,14 +44,13 @@ export const WEATHER_RE = /temperature|°[cf]|weather|rain|snow|hurricane|tornad
 
 // ─── Liquidity / Volume / Price thresholds ───────────────────
 
-// Dynamic liquidity: max(MIN_LIQUIDITY_FLOOR, 100 × typical Kelly bet size), capped at $10K
+// Dynamic liquidity: max(MIN_LIQUIDITY_FLOOR, 50 × typical Kelly bet size), capped at $10K
 // This ensures markets have enough depth to absorb our orders without slippage.
-// With bankroll $100 and typical bet $2.50 → min_liq = max(500, 250) = $500
-// With bankroll $1000 and typical bet $25 → min_liq = clamp(500, 2500, 10000) = $2,500
+// With bankroll $1500 and typical bet $37.50 → min_liq = max(1500, 1875) = $1,875
 // Cap at $10K so high bankrolls don't over-filter
-export const MIN_LIQUIDITY_FLOOR = 500;    // Absolute floor — never go below $500
+export const MIN_LIQUIDITY_FLOOR = 1500;   // Absolute floor — $1,500
 export const MIN_LIQUIDITY_CAP = 10_000;   // Absolute cap — never require more than $10K
-export const MIN_LIQUIDITY_MULTIPLIER = 100; // min_liq = 100× expected bet size
+export const MIN_LIQUIDITY_MULTIPLIER = 50; // min_liq = 50× expected bet size
 export const MIN_VOLUME = 300;             // $300 — minimum trading activity
 export const WEATHER_MIN_LIQUIDITY = 500;  // weather with >12h horizon
 export const WEATHER_MIN_VOLUME = 300;
