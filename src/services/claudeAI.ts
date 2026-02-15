@@ -134,162 +134,57 @@ function buildOSINTPrompt(
     ? `HISTORY: {"trades": ${history.totalTrades}, "wins": ${history.wins}, "losses": ${history.losses}, "winRate": ${(history.winRate / 100).toFixed(2)}, "roi": ${history.totalPnl !== 0 ? (history.totalPnl / 100).toFixed(3) : "0.000"}, "pnl": ${history.totalPnl.toFixed(2)}}\n  → ${history.winRate >= 55 ? "Calibration OK — maintain discipline." : history.winRate >= 45 ? "Marginal — tighten confidence thresholds, require stronger edge." : "Poor — be MORE conservative, raise minimum confidence to 70, minimum edge to 0.12."}`
     : "HISTORY: No resolved trades yet — be conservative, require strong evidence.";
 
-  return `You are a QUANTITATIVE MISPRICING SCANNER for Polymarket.
-Detect when public information (polls, weather data, indicators, odds, official data) is NOT yet reflected in prices.
+  return `Polymarket mispricing scanner. Find where public data (odds, forecasts, polls) disagrees with market prices.
 
-UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | RISK: medium-low (preserve capital > maximize return)
-${historyLine}
+UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
-═══ WEB ACCESS (MANDATORY — USE IT) ═══
-You HAVE internet access via the web_search tool. You MUST use it before making any recommendation.
-Search for current, real-time information. The more pages you consult, the better your analysis.
-Every recommendation MUST include ≥2 sources with date (YYYY-MM-DD) and working URL.
+WEB SEARCH: You have web_search. Use it ONLY for your top 2-3 candidates (save tokens). Search for:
+- Sports: bookmaker odds (Pinnacle/Betfair/DraftKings). No odds found → skip.
+- Weather: official forecast (NWS/NOAA/AccuWeather). No forecast → skip.
+- Other: recent news, polls, official data.
+Each recommendation needs ≥2 dated sources with URLs.
 
-MANDATORY searches by category:
-  Sports/Esports: MUST search for current bookmaker odds (Pinnacle, Betfair, DraftKings, etc.).
-    → If no current odds found → REJECT. No exceptions.
-  Weather: MUST search for current forecast model/official forecast (NWS, NOAA, Met Office, AccuWeather, etc.).
-    → If no current forecast found → REJECT. No exceptions.
-  Politics/Economy: Search latest polls, official data releases, breaking news from last 7 days.
-  All markets: If you cannot verify resolution rules from the market page or official source → REJECT.
+BLACKLIST (already own): ${blacklist}
 
-Live web data is your PRIMARY source. Training data (cutoff ~early 2025) is supplementary.
-→ DIVERSIFY recommendations across categories. Don't cluster in a single topic.
-
-═══ BLACKLIST (FORBIDDEN — already have position) ═══
-${blacklist}
-
-═══ MARKETS (${shortTermMarkets.length} pre-filtered, all valid — analyze every one) ═══
+MARKETS (${shortTermMarkets.length}):
 ${marketLines}
 
-═══ 3-STEP FLOW: SCAN → RESEARCH → SIZE ═══
+PROCESS: Mentally scan all markets. Pick 2-3 with likely edge. web_search those. Recommend if edge confirmed.
 
-─── STEP 1: SCAN (all ${shortTermMarkets.length} markets) ───
-For EACH market assign:
-  category | confidence_prelim (0-100) | flag: "candidate" (≥50 + you have data) or "reject"
-  prelimSide: "YES" | "NO" — which side you see potential edge on (even for rejects, best guess)
-  Sports only: marketType (moneyline|spread|total|draw|btts|prop), line (exact number or null).
-  Sports lines must match exactly (e.g. O/U 146.5 vs O/U 146.5, NOT vs 148).
-→ ALL markets go into "scanned" array.
+MATH (use the side you recommend):
+  pReal_YES = your YES probability. If side=YES: pMarket=YES_price, pReal=pReal_YES. If side=NO: pMarket=NO_price, pReal=1-pReal_YES.
+  edge = pReal - pMarket (must be ≥0.08, sports ≥0.12)
+  friction: Liq≥$50K→1.2% | $10-50K→2% | $2-10K→3.5% | <$2K→5%. Near-expiry(<30min): +2%.
+  Weather with horizon>12h: friction=2.5%, use LIMIT orders.
+  evNet = edge - friction (must be >0)
+  kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.25*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
+  Confidence ≥60 required (sports ≥65). <2 sources → confidence ≤40 → skip.
+  Max 1 per cluster (mutually exclusive markets). Price must be 3¢-97¢.
 
-─── STEP 2: RESEARCH (top 3-5 candidates, using prelimSide from Step 1) ───
-For each candidate:
-  1. Verify resolution rules (official source, definition, timezone). Can't verify → confidence ≤ 40, don't recommend.
-  2. Search for ≥2 concrete dated data points via web_search. Cite with date (YYYY-MM-DD) and real URL.
-  3. Detect clusterId (mutually exclusive markets). Max 1 recommendation per cluster.
-     Example: markets [3] "Real Madrid vs Sociedad — Madrid win" and [7] "Real Madrid vs Sociedad — draw"
-     → same match → clusterId: "rm-rso-20260214". Pick only the best edge.
-     Example: markets [11] "Seoul high temp ≥8°C" and [12] "Seoul high temp ≥9°C" → clusterId: "seoul-temp-0214".
-  4. Estimate pReal + [pLow, pHigh] (80% credible interval).
-
-─── STEP 3: SIZE + DECIDE ───
-See EDGE, FRICTION, and KELLY rules below. If all thresholds met → "recommendations" array.
-
-═══ CORE RULES ═══
-
-SIDE-AWARE MATH (critical — prevents phantom edge):
-  Always estimate pReal_YES first (your YES probability).
-  If recommendedSide=YES → pMarket = YES_price, pReal = pReal_YES.
-  If recommendedSide=NO  → pMarket = NO_price (from market data, NOT 1-YES — there is spread), pReal = 1 - pReal_YES.
-  edge = pReal - pMarket. All values (pReal, pLow, pHigh, edge, evNet) must be on the SAME side.
-
-DYNAMIC FRICTION (by liquidity tier):
-  spread_est:   Liq≥$50K→0.5% | $10-50K→1.0% | $2-10K→2.0% | <$2K→3.5%
-  fee_est:      default 0.5% (may vary)
-  slippage_est: Liq≥$50K→0.2% | $10-50K→0.5% | <$10K→1.0%
-  Near-expiry (<30min): +2% friction, -10 confidence, require edge≥0.15. Note risk in executionNotes.
-  friction = spread + fee + slippage + near_expiry_penalty
-  evNet = edge - friction (must be > 0)
-
-  ── WEATHER EXCEPTION (patient limit orders) ──
-  Weather markets with horizon > 12h AND Liq ≥ $100:
-    spread_est = 1.5%, slippage = 0.5% → friction = 1.5% + 0.5% + 0.5% = 2.5%
-    Rationale: patient limit orders in thin weather markets fill at better prices over 12h+.
-    Use orderType: "LIMIT" and note patience strategy in executionNotes.
-
-THRESHOLDS TO RECOMMEND:
-  edge ≥ 0.08 AND confidence ≥ 60 AND evNet > 0
-  Price must be 3¢-97¢ (prefer 15¢-85¢ range). Outside → reject.
-
-SPORTS-SPECIFIC:
-  You MUST search for current bookmaker odds (Pinnacle, Betfair, DraftKings) via web_search.
-  No current odds found → REJECT. "I think team X is better" without live odds = REJECT.
-  Require edge ≥ 0.12 AND confidence ≥ 65 for sports.
-  Normalize bookmaker odds with vig removal:
-    pFair = pRaw / (pTeam1 + pTeam2), then edge = pFair - pMarket.
-
-WEATHER-SPECIFIC:
-  You MUST search for current forecast (NWS, NOAA, Met Office, AccuWeather) via web_search.
-  No current forecast found → REJECT.
-  Weather has HIGH edge potential — use reduced friction tier for patient limit orders (see WEATHER EXCEPTION above).
-
-CONFIDENCE RULES (single source of truth):
-  < 2 sources with date + URL → confidence ≤ 40, don't recommend.
-  Can't verify resolution rules → confidence ≤ 40, don't recommend.
-  NEVER fabricate sources, URLs, or data. Every source MUST be a real URL found via web_search.
-
-QUARTER-KELLY SIZING:
-  kellyFraction = (pReal × b - q) / b   where b = (1/price - 1), q = 1 - pReal
-  sizeUsd = kellyFraction × 0.25 × bankroll
-  Hard cap: sizeUsd ≤ 10% bankroll (≤ $${(bankroll * 0.1).toFixed(2)})
-  MINIMUM: sizeUsd < $2 → do NOT recommend (friction eats edge at sub-$2 sizes).
-  kellyFraction ≤ 0 → do NOT recommend.
-  maxEntryPrice must preserve edge ≥ 0.05 after execution.
-  Max 1 per cluster. Prefer thematic diversity (≤ 2 per category).
-  Recommend ALL that meet criteria. If none qualify → empty arrays.
-
-═══ OUTPUT FORMAT ═══
-Respond with ONLY raw JSON (no code fence, no commentary). Example:
+OUTPUT: Raw JSON only, no code fence.
 {
-  "asOfUtc": "${now.toISOString()}",
-  "mode": "SCANNER",
-  "bankroll": ${bankroll.toFixed(2)},
-  "summary": "2-3 lines: opportunities found (if any) and why most were discarded",
-  "scanned": [
-    {
-      "marketId": "ID",
-      "question": "...",
-      "category": "politics|economy|weather|sports|...|other",
-      "flag": "candidate|reject",
-      "notes": "1-2 lines: why rejected or analysis notes",
-      "prelimSide": "YES|NO",
-      "confidence_prelim": 0,
-      "clusterId": "...|null",
-      "marketType": "moneyline|spread|total|...|null",
-      "line": null
-    }
-  ],
+  "summary": "1-2 lines",
   "recommendations": [
     {
-      "marketId": "exact ID from ID:xxx",
-      "question": "exact market question",
-      "category": "...",
-      "clusterId": "...|null",
-      "pMarket": 0.00,
-      "pReal": 0.00,
-      "pLow": 0.00,
-      "pHigh": 0.00,
-      "edge": 0.00,
-      "friction": 0.00,
-      "evNet": 0.00,
+      "marketId": "ID from market list",
+      "question": "exact question",
+      "category": "sports|weather|politics|other",
+      "clusterId": "cluster-id|null",
+      "pMarket": 0.00, "pReal": 0.00, "pLow": 0.00, "pHigh": 0.00,
+      "edge": 0.00, "friction": 0.00, "evNet": 0.00,
       "confidence": 0,
       "recommendedSide": "YES|NO",
-      "maxEntryPrice": 0.00,
-      "sizeUsd": 0.00,
-      "orderType": "LIMIT",
-      "reasoning": "5-8 lines with dates + logic + counter-evidence",
-      "sources": ["Source - YYYY-MM-DD - URL - description"],
-      "risks": "2-3 lines",
-      "resolutionCriteria": "verified resolution rules",
-      "expiresInMin": 0,
-      "liqUsd": 0,
-      "volUsd": 0,
-      "dataFreshnessScore": 0,
-      "executionNotes": "spread/depth/timing"
+      "maxEntryPrice": 0.00, "sizeUsd": 0.00, "orderType": "LIMIT",
+      "reasoning": "3-5 lines with data + logic",
+      "sources": ["Source - YYYY-MM-DD - URL"],
+      "risks": "1-2 lines",
+      "resolutionCriteria": "how it resolves",
+      "expiresInMin": 0, "liqUsd": 0, "volUsd": 0,
+      "executionNotes": "spread/timing notes"
     }
   ]
 }
-\`\`\``;
+If nothing qualifies: {"summary":"reason","recommendations":[]}`;
 }
 
 // ─── Types ────────────────────────────────────────────
@@ -340,9 +235,9 @@ export async function analyzeMarketsWithClaude(
     },
     body: JSON.stringify({
       model: modelId,
-      max_tokens: 16384,
+      max_tokens: 4096,
       temperature: 0.3,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -431,13 +326,7 @@ export async function analyzeMarketsWithClaude(
         }));
     }
 
-    // Log scanned markets count (supports both new "scanned" and legacy "skipped" key)
-    const scannedArr = parsed.scanned || parsed.skipped || [];
-    if (Array.isArray(scannedArr) && scannedArr.length > 0) {
-      const candidates = scannedArr.filter((s: any) => s.flag === "candidate").length;
-      const rejects = scannedArr.filter((s: any) => s.flag === "reject").length;
-      log(`📋 Scanned: ${scannedArr.length} markets (${candidates} candidates, ${rejects} rejects)`);
-    }
+    log(`📋 Recommendations: ${analyses.length}`);
   } catch (parseError) {
     log("⚠️ Error parseando respuesta de Claude:", parseError);
     log("Respuesta raw:", content.slice(0, 500));
