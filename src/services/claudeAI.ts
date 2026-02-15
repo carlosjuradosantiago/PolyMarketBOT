@@ -198,6 +198,53 @@ export interface ClaudeResearchResult {
   responseTimeMs: number;
 }
 
+// ─── Robust JSON extractor ──────────────────────────
+// Claude sometimes adds reasoning text before/after JSON output.
+// This function tries multiple strategies to extract valid JSON.
+function extractJSON(raw: string): string {
+  const trimmed = raw.trim();
+
+  // Strategy 1: Already valid JSON
+  if (trimmed.startsWith("{")) {
+    try { JSON.parse(trimmed); return trimmed; } catch { /* fall through */ }
+  }
+
+  // Strategy 2: Extract from ```json ... ``` code fence (with possible preamble text)
+  const fenceMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) {
+    const inner = fenceMatch[1].trim();
+    try { JSON.parse(inner); return inner; } catch { /* fall through */ }
+  }
+
+  // Strategy 3: Find the outermost { ... } that contains "summary" or "recommendations"
+  const firstBrace = raw.indexOf("{");
+  if (firstBrace >= 0) {
+    // Walk from the first { and find its matching } by counting braces
+    let depth = 0;
+    let lastBrace = -1;
+    for (let i = firstBrace; i < raw.length; i++) {
+      if (raw[i] === "{") depth++;
+      else if (raw[i] === "}") {
+        depth--;
+        if (depth === 0) { lastBrace = i; break; }
+      }
+    }
+    if (lastBrace > firstBrace) {
+      const candidate = raw.substring(firstBrace, lastBrace + 1);
+      try {
+        const obj = JSON.parse(candidate);
+        if (obj.summary !== undefined || obj.recommendations !== undefined) {
+          log(`🔧 JSON extraído de texto (preamble ${firstBrace} chars descartados)`);
+          return candidate;
+        }
+      } catch { /* fall through */ }
+    }
+  }
+
+  // Strategy 4: Nothing worked, return trimmed raw and let caller handle parse error
+  return trimmed;
+}
+
 // ─── API Call ─────────────────────────────────────────
 
 export async function analyzeMarketsWithClaude(
@@ -284,10 +331,7 @@ export async function analyzeMarketsWithClaude(
   let summary = "";
 
   try {
-    let jsonStr = content.trim();
-    if (jsonStr.startsWith("```")) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
+    const jsonStr = extractJSON(content);
 
     const parsed = JSON.parse(jsonStr);
     summary = parsed.summary || "";
