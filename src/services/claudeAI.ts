@@ -384,7 +384,7 @@ export async function analyzeMarketsWithClaude(
     },
     body: JSON.stringify({
       model: modelId,
-      max_tokens: 4096,
+      max_tokens: 16384,
       temperature: 0.3,
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: shortTermMarkets.length * 5 }],
       messages: [{ role: "user", content: prompt }],
@@ -403,7 +403,13 @@ export async function analyzeMarketsWithClaude(
 
   const inputTokens = data.usage?.input_tokens || 0;
   const outputTokens = data.usage?.output_tokens || 0;
+  const stopReason = data.stop_reason || 'unknown';
   const costUsd = calculateTokenCost(inputTokens, outputTokens, modelId);
+
+  log(`🛑 stop_reason: ${stopReason} (max_tokens would mean output was truncated)`);
+  if (stopReason === 'max_tokens') {
+    log(`⚠️ OUTPUT TRUNCATED — Claude ran out of output tokens. Response may be incomplete.`);
+  }
 
   // With web_search, response has multiple content blocks:
   // [server_tool_use, web_search_tool_result, ..., text (final JSON)]
