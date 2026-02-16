@@ -155,16 +155,17 @@ TWO-PHASE PROCESS (MANDATORY — follow this exact order):
   Skip obvious no-edge markets (price already fair, topic unknowable, spread too wide for the edge).
 
 ═══ PHASE 2: DEEP RESEARCH (web_search — MANDATORY for ALL 10 candidates) ═══
-  You have web_search (up to 20 uses — 2 per candidate MAX). You MUST use web_search for EACH of your 10 candidates.
+  You have web_search (ONLY 10 uses total — 1 per candidate). You MUST use web_search for EACH of your 10 candidates.
   DO NOT skip any candidate without searching first. "Insufficient data" without a web_search call is FORBIDDEN.
-  For EACH candidate: do 1-5 searches, find real data, compute pReal, then decide if it qualifies.
-  After searching, if the data shows no edge → move to skipped with the actual data as reason (e.g. "forecast 44°F, bin 42-43°F, pReal=0.21, market=0.14, edge=0.07 < minEdge 0.12").
-  Each recommendation needs ≥2 dated sources with URLs.
-  *** EVERY top-10 candidate MUST have at least 1 web_search call. No exceptions. ***
+  For EACH candidate: do exactly 1 search, find real data, compute pReal, then decide if it qualifies.
+  BUDGET: You have exactly 10 searches. Use 1 per candidate. Batch related cities in 1 search query.
+  After searching, if the data shows no edge → move to skipped with the actual data as reason.
+  Each recommendation needs ≥1 dated source with URL.
+  *** EVERY top-10 candidate MUST have exactly 1 web_search call. No exceptions. ***
   If research shows no edge → move it to skipped with reason. Do NOT backfill with market #11.
 
 CATEGORY SEARCH TIPS:
-- Weather: 1 search per city MAX. Batch nearby cities in ONE search: "NWS forecast Chicago Dallas Atlanta Feb 17". DO NOT search each city individually.
+- Weather: Batch ALL weather cities in 1-2 searches: "NWS forecast Chicago Dallas Atlanta Feb 17". DO NOT search each city individually — use 1 query for all US cities, 1 for non-US.
 - Politics/polls: RealClearPolitics, FiveThirtyEight, 270toWin, official statements.
 - Entertainment/Netflix: FlixPatrol, Netflix Top 10, Box Office Mojo, Deadline. If no official ranking yet, use FlixPatrol but cap confidence ≤ 65.
 - Finance/Stocks: analyst consensus, recent price action, options flow. Cap confidence ≤ 55 without dated catalyst.
@@ -230,7 +231,7 @@ BLACKLIST (already own): ${blacklist}
 MARKETS (${shortTermMarkets.length}):
 ${marketLines}
 
-PROCESS: Follow the TWO-PHASE PROCESS above. Phase 1: screen all ${shortTermMarkets.length} markets without searching. Phase 2: deep-search your top 10 only (max 50 searches total).
+PROCESS: Follow the TWO-PHASE PROCESS above. Phase 1: screen all ${shortTermMarkets.length} markets without searching. Phase 2: search your top 10 (EXACTLY 10 searches, 1 per candidate).
 
 MATH:
   pReal = ALWAYS your probability that YES happens (regardless of which side you recommend).
@@ -284,7 +285,13 @@ OUTPUT: Raw JSON only, no code fence.
   ]
 }
 IMPORTANT: Always include "skipped" array listing ALL markets you did NOT recommend, with a brief reason each.
-If nothing qualifies: {"summary":"reason","skipped":[...],"recommendations":[]}`;
+If nothing qualifies: {"summary":"reason","skipped":[...],"recommendations":[]}
+
+═══ MANDATORY FINAL STEP ═══
+After completing ALL web searches, you MUST output the JSON response IMMEDIATELY.
+Do NOT write additional commentary or analysis after the searches — go STRAIGHT to the JSON block.
+Never finish your response without the complete JSON output. The JSON is the ONLY thing that matters.
+If you run out of searches, use the data you already have. ALWAYS output JSON.`;
 }
 
 // ─── Types ────────────────────────────────────────────
@@ -392,7 +399,7 @@ export async function analyzeMarketsWithClaude(
       model: modelId,
       max_tokens: 16384,
       temperature: 0.3,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 20 }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }],
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -534,6 +541,22 @@ export async function analyzeMarketsWithClaude(
     log(`⚠️ Claude devolvió 0 recs y 0 skipped sin JSON válido. Reintentando SIN web_search...`);
     log(`   (Causa probable: ${inputTokens} input tokens de web_search inflaron el contexto)`);
     try {
+      // Build a SIMPLIFIED retry prompt — no two-phase process, just direct analysis
+      const retryMarketLines = shortTermMarkets.slice(0, 15).map((m: any, i: number) => {
+        const prices = JSON.parse(m.outcomePrices || '["0.5","0.5"]');
+        return `[${i+1}] "${m.question}" | YES=${(prices[0]*100).toFixed(0)}¢ NO=${(prices[1]*100).toFixed(0)}¢ | ID:${m.id}`;
+      }).join("\n");
+      const retryPrompt = `You are a Polymarket analyst. Analyze these markets using ONLY general knowledge (no web search available).
+For each market, estimate pReal (probability YES happens) and compare to the market price.
+Recommend any market where |pReal - pMarket| > 0.08.
+
+BANKROLL: $${bankroll.toFixed(2)}
+
+MARKETS:
+${retryMarketLines}
+
+Output ONLY valid JSON (no code fence, no extra text):
+{"summary":"brief","skipped":[{"marketId":"ID","question":"q","reason":"why"}],"recommendations":[{"marketId":"ID","question":"q","category":"cat","pMarket":0.0,"pReal":0.0,"pLow":0.0,"pHigh":0.0,"edge":0.0,"friction":0.02,"evNet":0.0,"confidence":65,"recommendedSide":"YES|NO","maxEntryPrice":0.0,"sizeUsd":0,"orderType":"LIMIT","reasoning":"why","sources":["General knowledge"],"risks":"risks","resolutionCriteria":"how"}]}`;
       const retryStart = Date.now();
       const retryResponse = await fetch(CLAUDE_PROXY, {
         method: "POST",
@@ -544,10 +567,10 @@ export async function analyzeMarketsWithClaude(
         },
         body: JSON.stringify({
           model: modelId,
-          max_tokens: 16384,
+          max_tokens: 8192,
           temperature: 0.3,
           // NO web_search — force Claude to use general knowledge only
-          messages: [{ role: "user", content: prompt + "\n\nIMPORTANT: web_search is NOT available. Use ONLY your general knowledge to screen and recommend. Output the JSON immediately." }],
+          messages: [{ role: "user", content: retryPrompt }],
         }),
       });
       if (retryResponse.ok) {
