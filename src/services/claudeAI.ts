@@ -141,11 +141,11 @@ function buildOSINTPrompt(
 
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
-WEB SEARCH: You have web_search (up to ${Math.min(shortTermMarkets.length * 5, 100)} uses). BUDGET ALLOCATION:
+WEB SEARCH: You have web_search (up to ${shortTermMarkets.length * 5} uses — 5 per market). BUDGET ALLOCATION:
   Weather markets: MAX 2 searches per city (1 official + 1 backup). Batch nearby cities: "NWS forecast Chicago Dallas Atlanta Feb 17" = 1 search for 3 cities.
   Non-weather markets: 3-5 searches each.
   PROCESS ORDER: Search NON-WEATHER markets FIRST (politics, entertainment, finance, polls — they need more research). THEN weather (only needs 1-2 quick searches each).
-  "Insufficient search budget" is NEVER a valid skip reason unless you have truly exhausted ALL ${Math.min(shortTermMarkets.length * 5, 100)} searches. COUNT your searches — if you've used <50, you have budget.
+  "Insufficient search budget" is NEVER a valid skip reason unless you have truly exhausted ALL ${shortTermMarkets.length * 5} searches. COUNT your searches — if you've used less than half, you have budget.
   Each recommendation needs ≥2 dated sources with URLs (1 official + 1 secondary, or 2 secondary).
 
 CATEGORY RULES:
@@ -386,7 +386,7 @@ export async function analyzeMarketsWithClaude(
       model: modelId,
       max_tokens: 4096,
       temperature: 0.3,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: Math.min(shortTermMarkets.length * 5, 100) }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: shortTermMarkets.length * 5 }],
       messages: [{ role: "user", content: prompt }],
     }),
   });
