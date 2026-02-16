@@ -170,18 +170,12 @@ function App() {
     const refs: PaperOrderRef[] = orders
       .filter(o => o.marketId)
       .map(o => ({ conditionId: o.conditionId, marketId: o.marketId }));
-    console.log("[App] loadPaperPrices: openOrders:", orders.length, "refs with marketId:", refs.length);
-    console.log("[App] Sample orders:", orders.slice(0, 3).map(o => ({ id: o.id?.slice(0, 8), mId: o.marketId, cId: o.conditionId?.slice(0, 16) })));
-    if (refs.length === 0) {
-      console.log("[App] No refs with marketId — skipping");
-      return;
-    }
+    if (refs.length === 0) return;
     try {
       const prices = await fetchPaperOrderPrices(refs);
-      console.log("[App] Got paperPrices:", Object.keys(prices).length, "keys:", Object.keys(prices).slice(0, 5).map(k => k.slice(0, 16)));
       setPaperPrices(prices);
-    } catch (err) {
-      console.error("[App] fetchPaperOrderPrices error:", err);
+    } catch {
+      // Silently ignore — will retry on next interval
     }
   }, []);
 
