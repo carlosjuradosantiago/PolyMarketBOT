@@ -310,8 +310,20 @@ function classifyMarketCategory(market: PolymarketMarket): string {
  * Within each category, markets are sorted by volume (best first).
  * This ensures the batch sent to Claude has diverse topics.
  */
-/** Priority order for pool diversification */
-const CATEGORY_PRIORITY = ['weather', 'politics', 'geopolitics', 'entertainment', 'other', 'finance', 'crypto'];
+/** Priority order for pool diversification — non-weather first so Claude sees diverse markets */
+const CATEGORY_PRIORITY = ['politics', 'geopolitics', 'entertainment', 'other', 'finance', 'crypto', 'weather'];
+
+/** Max markets per category in a single batch (prevents weather from dominating) */
+const MAX_PER_CATEGORY: Record<string, number> = {
+  weather: 8,      // 8 max — Claude only needs 1-2 searches each
+  politics: 12,
+  geopolitics: 10,
+  entertainment: 10,
+  finance: 8,
+  crypto: 6,
+  other: 10,
+};
+const DEFAULT_CAT_CAP = 10;
 
 function diversifyPool(markets: PolymarketMarket[], maxSize: number): PolymarketMarket[] {
   const buckets = new Map<string, PolymarketMarket[]>();
@@ -323,7 +335,16 @@ function diversifyPool(markets: PolymarketMarket[], maxSize: number): Polymarket
   // Sort each bucket by volume descending
   for (const [, arr] of buckets) arr.sort((a, b) => b.volume - a.volume);
 
-  // Order categories by priority (non-sports first), then any unlisted
+  // Apply per-category cap BEFORE round-robin
+  for (const [cat, arr] of buckets) {
+    const cap = MAX_PER_CATEGORY[cat] ?? DEFAULT_CAT_CAP;
+    if (arr.length > cap) {
+      log(`  🔪 Category '${cat}' capped: ${arr.length} → ${cap}`);
+      arr.length = cap;
+    }
+  }
+
+  // Order categories by priority, then any unlisted
   const categories = CATEGORY_PRIORITY.filter(c => buckets.has(c));
   for (const c of buckets.keys()) {
     if (!categories.includes(c)) categories.push(c);

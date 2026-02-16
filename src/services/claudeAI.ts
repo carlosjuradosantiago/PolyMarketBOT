@@ -141,21 +141,32 @@ function buildOSINTPrompt(
 
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
-WEB SEARCH: You have web_search (up to ${Math.min(shortTermMarkets.length * 5, 100)} uses — 5 per market). STRATEGY:
-1. WEATHER FIRST — weather markets are easiest to verify. Search ALL weather markets. Batch nearby cities in one search (e.g. "NWS forecast Chicago NYC Feb 17").
-2. Then search remaining non-weather candidates with highest likely edge.
-3. Each recommendation needs ≥2 dated sources with URLs (1 official + 1 secondary, or 2 secondary).
-- Politics/geopolitics: polls, official statements, vote counts.
+WEB SEARCH: You have web_search (up to ${Math.min(shortTermMarkets.length * 5, 100)} uses). BUDGET ALLOCATION:
+  Weather markets: MAX 2 searches per city (1 official + 1 backup). Batch nearby cities: "NWS forecast Chicago Dallas Atlanta Feb 17" = 1 search for 3 cities.
+  Non-weather markets: 3-5 searches each.
+  PROCESS ORDER: Search NON-WEATHER markets FIRST (politics, entertainment, finance, polls — they need more research). THEN weather (only needs 1-2 quick searches each).
+  "Insufficient search budget" is NEVER a valid skip reason unless you have truly exhausted ALL ${Math.min(shortTermMarkets.length * 5, 100)} searches. COUNT your searches — if you've used <50, you have budget.
+  Each recommendation needs ≥2 dated sources with URLs (1 official + 1 secondary, or 2 secondary).
+
+CATEGORY RULES:
+- Politics/geopolitics: polls, official statements, vote counts. ALWAYS search — these often have clear edge.
+- Polls/approval ratings: search RealClearPolitics, FiveThirtyEight, 270toWin. Approval markets often have predictable trends.
 - Entertainment/Netflix: FlixPatrol daily charts + Netflix official Top 10. If no official ranking published yet, use FlixPatrol but cap confidence ≤ 65 and require 2 signals (chart position + trend direction).
-- Finance/Stocks: analyst consensus, recent price action, options flow. EXCLUDE "Up/Down" stock markets UNLESS there is a dated catalyst (earnings, guidance, macro release, Fed decision) within the market's expiry horizon. Without a catalyst, stock direction is ~50/50 noise — skip.
+- Entertainment/box office: search Box Office Mojo, The Numbers, Deadline. Always verify with actual data.
+- Finance/Stocks "Up/Down": These are harder — cap confidence ≤ 60 unless you find a dated catalyst (earnings, Fed decision, macro data release) within expiry. With catalyst, normal confidence. Without catalyst, only recommend if strong technical momentum AND confidence ≤ 55.
+- Legal/SCOTUS: see LEGAL METHOD below.
 
 WEATHER SEARCH — ANTI-EXCUSE RULE (MANDATORY):
-  For ANY major city (pop > 100K): official forecasts EXIST. You MUST find and cite them.
-  Step 1: Search the official source for that country (see WEATHER SEARCH PROTOCOL below).
-  Step 2: If official source fails after 2 attempts (blocked/timeout/parseable), then use 2 strong secondary sources (AccuWeather + one of: Meteoblue/Weather.com/Windy/Meteostat) and cap confidence ≤ 65.
-  Step 3: If search budget is exhausted, mark as "NOT SEARCHED (budget exhausted)" — NOT "no data found".
-  FORBIDDEN phrases: "no specific forecast data", "no exact forecast", "no forecast data found", "insufficient forecast data", "could not find forecast".
-  If you write any of those phrases for a city with pop > 100K, your analysis is WRONG — go back and search again.
+  For ANY city (pop > 100K): official forecasts ALWAYS EXIST. You MUST find them. NO EXCUSES.
+  Step 1: Search the official source (see WEATHER SEARCH PROTOCOL). This ALWAYS works for Miami, NYC, Chicago, Dallas, Atlanta, London, Toronto, São Paulo, Seoul, Buenos Aires, Wellington, Ankara.
+  Step 2: If official source fails → use AccuWeather or Weather.com (they cover EVERY city on Earth). Cap confidence ≤ 65.
+  Step 3: If budget truly exhausted (you've used 80+ searches) → mark "NOT SEARCHED (budget exhausted)".
+  FORBIDDEN phrases — if you write ANY of these, your analysis is WRONG:
+    "no specific forecast data", "no exact forecast", "no forecast data found",
+    "insufficient forecast data", "could not find forecast",
+    "insufficient weather data", "insufficient specific weather data",
+    "no weather data", "unable to find forecast", "no data available".
+  These phrases are IMPOSSIBLE for cities with pop > 100K — official agencies + AccuWeather + Weather.com ALL have data.
 
 WEATHER PRE-FILTER (saves searches — apply BEFORE searching):
   For "exactly X°C" or narrow 1-2°F bin markets: quick-check if any source you already have shows forecast HIGH near that bin. If forecast HIGH is > ±3°C (±5°F) away from the bin → auto-skip with reason "forecast μ far from bin, no edge" without burning a search.
@@ -233,10 +244,12 @@ MATH:
 
 CRITICAL RULES:
   - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL and verified it in THIS session with web_search. Hallucinating resolution data is FORBIDDEN. If you haven't verified with a URL, treat the market as unresolved.
-  - NEVER skip a weather market saying "no specific forecast data", "no exact forecast", "no forecast data found", or "exact temperature too risky" — ALWAYS use the WEATHER METHOD with forecast HIGH + σ to compute bin probability. These phrases are BANNED for cities with pop > 100K.
+  - NEVER skip a weather market with any variation of "no data"/"insufficient data"/"no forecast". For cities pop > 100K, forecasts ALWAYS exist on NWS/AccuWeather/Weather.com. Use the WEATHER METHOD with forecast HIGH + σ to compute bin probability.
+  - "Insufficient search budget" is NOT valid if you've used fewer than 80% of your total searches. COUNT before claiming budget exhaustion.
   - For entertainment/box office: only claim resolved if you found the actual data via web_search with a URL. Weekend estimates ≠ final results.
   - Netflix/streaming: if no official ranking yet, use FlixPatrol but cap confidence ≤ 65, require 2 signals (position + trend).
-  - Stocks "Up/Down": SKIP unless a dated catalyst exists within the expiry window. No catalyst = no edge = skip.
+  - Stocks "Up/Down": prefer to analyze WITH catalyst. Without catalyst, you may still recommend with confidence ≤ 55 if strong technical signal.
+  - GOAL: Find profitable bets. Do NOT skip everything — the user needs actionable recommendations. If 20+ markets are sent, at least SEARCH all of them before skipping.
 
 OUTPUT: Raw JSON only, no code fence.
 {
