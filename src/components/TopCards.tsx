@@ -36,11 +36,15 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
           {walletInfo?.isValid ? (
             <>
               {formatAddress(walletInfo.address)}
-              {walletInfo.balance != null && (
+              {walletInfo.openOrders && walletInfo.openOrders.count > 0 ? (
+                <span className="ml-1 text-yellow-400">
+                  📋 {walletInfo.openOrders.count} {walletInfo.openOrders.count === 1 ? "orden" : "órdenes"} (${walletInfo.openOrders.totalLocked.toFixed(2)})
+                </span>
+              ) : walletInfo.balance != null ? (
                 <span className="ml-1 text-gray-600">
                   (wallet: ${walletInfo.balance.usdc.toFixed(2)})
                 </span>
-              )}
+              ) : null}
             </>
           ) : t("card.notConnected")}
         </div>
