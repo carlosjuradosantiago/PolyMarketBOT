@@ -30,7 +30,7 @@ import {
   calculateStats,
   getBalanceHistory,
 } from "./services/paperTrading";
-import { fetchAllMarkets } from "./services/polymarket";
+import { fetchAllMarkets, fetchPaperOrderPrices, PaperPriceMap } from "./services/polymarket";
 import { WalletInfo } from "./services/wallet";
 import { clearCachedCreds } from "./services/clobAuth";
 import { runSmartCycle, setMaxExpiry, clearAnalyzedCache } from "./services/smartTrader";
@@ -58,6 +58,7 @@ function App() {
   const [balanceHistory, setBalanceHistory] = prepareBalanceHistory();
   const [config, setConfig] = useState<BotConfig>(defaultConfig);
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
+  const [paperPrices, setPaperPrices] = useState<PaperPriceMap>({});
   
   // UI state  — persist isRunning so bot survives page reloads
   const [isRunning, setIsRunning] = useState(false);
@@ -128,7 +129,14 @@ function App() {
 
     // Refresh wallet positions every 10 seconds for near-real-time price updates
     const walletInterval = setInterval(loadWalletInfo, 10_000);
-    return () => clearInterval(walletInterval);
+
+    // Refresh paper order prices every 10 seconds for live P&L
+    const paperInterval = setInterval(loadPaperPrices, 10_000);
+
+    return () => {
+      clearInterval(walletInterval);
+      clearInterval(paperInterval);
+    };
   }, []);
   
   // Load real wallet balance via secure server proxy (private key never in browser)
@@ -152,6 +160,29 @@ function App() {
       if (walletLoadCount.current === 0) console.error("Error loading wallet:", e);
     }
   };
+
+  // Fetch live prices for paper orders (uses Gamma API, no auth needed)
+  const portfolioRef = useRef(portfolio);
+  portfolioRef.current = portfolio;
+  const loadPaperPrices = useCallback(async () => {
+    const orders = portfolioRef.current.openOrders;
+    if (orders.length === 0) return;
+    const conditionIds = orders
+      .map(o => o.conditionId)
+      .filter(Boolean);
+    if (conditionIds.length === 0) return;
+    try {
+      const prices = await fetchPaperOrderPrices(conditionIds);
+      setPaperPrices(prices);
+    } catch {
+      // Silently ignore — will retry on next interval
+    }
+  }, []);
+
+  // Load paper prices once portfolio is loaded (also called by interval)
+  useEffect(() => {
+    if (portfolio.openOrders.length > 0) loadPaperPrices();
+  }, [portfolio.openOrders.length]);
 
   // Prepare balance history state
   function prepareBalanceHistory(): [BalancePoint[], React.Dispatch<React.SetStateAction<BalancePoint[]>>] {
@@ -585,7 +616,7 @@ function App() {
       </div>
 
       {/* Top Cards */}
-      <TopCards stats={stats} walletInfo={walletInfo} />
+      <TopCards stats={stats} walletInfo={walletInfo} portfolio={portfolio} paperPrices={paperPrices} />
 
       {/* Main Content */}
       <div className="flex-1 flex gap-3 px-4 pb-3 min-h-0 overflow-hidden">
@@ -618,6 +649,7 @@ function App() {
               portfolio={portfolio}
               onPortfolioUpdate={handlePortfolioUpdate}
               onActivity={addActivity}
+              paperPrices={paperPrices}
             />
           </div>
         )}

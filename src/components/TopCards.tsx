@@ -1,14 +1,17 @@
-import { BotStats } from "../types";
+import { BotStats, Portfolio } from "../types";
 import { formatCurrency, formatPnl, formatPercent } from "../utils/format";
 import { WalletInfo, formatAddress } from "../services/wallet";
+import { PaperPriceMap } from "../services/polymarket";
 import { useTranslation } from "../i18n";
 
 interface TopCardsProps {
   stats: BotStats;
   walletInfo: WalletInfo | null;
+  portfolio: Portfolio;
+  paperPrices: PaperPriceMap;
 }
 
-export default function TopCards({ stats, walletInfo }: TopCardsProps) {
+export default function TopCards({ stats, walletInfo, portfolio, paperPrices }: TopCardsProps) {
   const { t } = useTranslation();
   // Equity = cash balance + money invested in open orders
   const equity = stats.current_balance + (stats.invested_in_orders || 0);
@@ -121,17 +124,76 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
         )}
       </div>
 
-      {/* Open Orders */}
+      {/* Open Orders — with live P&L */}
       <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
         <div className="text-xs text-bot-muted font-semibold tracking-wider uppercase mb-1">
           {t("card.openOrders")}
         </div>
-        <div className="text-2xl font-bold text-blue-400">
-          {stats.open_orders || 0}
-        </div>
-        <div className="text-xs text-bot-muted mt-1">
-          {t("card.value")}: ${(stats.pending_value || 0).toFixed(2)}
-        </div>
+        {(() => {
+          const orders = portfolio.openOrders;
+          // Compute unrealized P&L from live prices
+          let unrealizedPnl = 0;
+          let currentTotalValue = 0;
+          const hasPrices = Object.keys(paperPrices).length > 0;
+          orders.forEach(o => {
+            const priceData = paperPrices[o.conditionId];
+            if (priceData && priceData.outcomePrices[o.outcomeIndex] != null) {
+              const currentPrice = priceData.outcomePrices[o.outcomeIndex];
+              const posValue = currentPrice * o.quantity;
+              currentTotalValue += posValue;
+              unrealizedPnl += posValue - o.totalCost;
+            } else {
+              // No price data — use entry price as fallback
+              currentTotalValue += o.totalCost;
+            }
+          });
+          return (
+            <>
+              <div className="text-2xl font-bold text-blue-400">
+                {orders.length}
+              </div>
+              <div className="text-xs text-bot-muted mt-1">
+                🔒 ${(stats.invested_in_orders || 0).toFixed(2)}
+                {hasPrices && orders.length > 0 && (
+                  <span className={unrealizedPnl >= 0 ? " text-bot-green" : " text-bot-red"}>
+                    {" → $"}{currentTotalValue.toFixed(2)}
+                    {" ("}{unrealizedPnl >= 0 ? "+" : ""}{unrealizedPnl.toFixed(2)}{")"}
+                  </span>
+                )}
+              </div>
+              {/* Individual paper position rows */}
+              {orders.length > 0 && hasPrices && (
+                <div className="mt-1.5 space-y-0.5">
+                  {orders.slice(0, 5).map((o, i) => {
+                    const priceData = paperPrices[o.conditionId];
+                    const currentPrice = priceData?.outcomePrices?.[o.outcomeIndex];
+                    const pnl = currentPrice != null ? (currentPrice * o.quantity) - o.totalCost : null;
+                    return (
+                      <div key={i} className="text-[10px] text-gray-400 truncate" title={o.marketQuestion}>
+                        <span className={o.outcome.toLowerCase().includes("yes") || o.outcome.toLowerCase().includes("sí") ? "text-green-400" : "text-red-400"}>
+                          {o.outcome}
+                        </span>
+                        {" "}{o.quantity.toFixed(1)} @${o.price.toFixed(2)}
+                        {currentPrice != null && (
+                          <>
+                            {" → $"}{currentPrice.toFixed(2)}
+                            <span className={(pnl ?? 0) >= 0 ? " text-bot-green" : " text-bot-red"}>
+                              {" "}{(pnl ?? 0) >= 0 ? "+" : ""}${(pnl ?? 0).toFixed(2)}
+                            </span>
+                          </>
+                        )}
+                        <span className="text-gray-600"> — {o.marketQuestion.length > 30 ? o.marketQuestion.slice(0, 30) + "…" : o.marketQuestion}</span>
+                      </div>
+                    );
+                  })}
+                  {orders.length > 5 && (
+                    <div className="text-[9px] text-gray-600">+{orders.length - 5} más...</div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Win Rate */}
