@@ -799,3 +799,61 @@ export function formatTimeRemaining(endDate: string): string {
   const minutes = Math.floor(diff / (1000 * 60));
   return `${minutes}m`;
 }
+
+// ─── Live Paper Order Prices ────────────────────────────────────────
+// Fetch current market prices for paper orders to compute unrealized P&L
+
+export interface PaperPriceMap {
+  [conditionId: string]: {
+    outcomePrices: number[];
+    question?: string;
+  };
+}
+
+/**
+ * Fetch current prices for all unique markets referenced by paper orders.
+ * Returns a map: conditionId → { outcomePrices, question }
+ */
+export async function fetchPaperOrderPrices(
+  conditionIds: string[]
+): Promise<PaperPriceMap> {
+  const unique = [...new Set(conditionIds)];
+  if (unique.length === 0) return {};
+
+  const results: PaperPriceMap = {};
+
+  // Fetch in parallel (max 6 concurrent to avoid hammering)
+  const BATCH_SIZE = 6;
+  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
+    const batch = unique.slice(i, i + BATCH_SIZE);
+    const promises = batch.map(async (cid) => {
+      try {
+        // Try condition_id query first (works for 0x... hashes)
+        const isCondition = cid.startsWith("0x");
+        const url = isCondition
+          ? `${GAMMA_API}/markets?condition_id=${cid}`
+          : `${GAMMA_API}/markets/${cid}`;
+        const resp = await fetch(url);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const market = isCondition
+          ? (Array.isArray(data) && data.length > 0 ? data[0] : null)
+          : data;
+        if (!market) return;
+
+        const prices = market.outcomePrices || market.outcome_prices;
+        if (!prices) return;
+        const parsed = typeof prices === "string" ? JSON.parse(prices) : prices;
+        results[cid] = {
+          outcomePrices: parsed.map((p: string | number) => parseFloat(String(p))),
+          question: market.question,
+        };
+      } catch {
+        // Silently skip failed lookups
+      }
+    });
+    await Promise.all(promises);
+  }
+
+  return results;
+}

@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Portfolio, PaperOrder } from "../types";
 import { cancelPaperOrder } from "../services/paperTrading";
+import { PaperPriceMap } from "../services/polymarket";
 import { translateMarketQuestion, translateOutcome } from "../utils/translate";
 import { useTranslation } from "../i18n";
 
@@ -8,6 +9,7 @@ interface OrdersPanelProps {
   portfolio: Portfolio;
   onPortfolioUpdate: (portfolio: Portfolio) => void;
   onActivity: (message: string, type: string) => void;
+  paperPrices: PaperPriceMap;
 }
 
 type OrderTab = "active" | "won" | "lost" | "cancelled";
@@ -131,7 +133,7 @@ function getTimeProgress(createdAt: string, endDate?: string): number {
 
 // ─── Main Component ─────────────────────────────────────────
 
-export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }: OrdersPanelProps) {
+export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, paperPrices }: OrdersPanelProps) {
   const [activeTab, setActiveTab] = useState<OrderTab>("active");
   const { t } = useTranslation();
 
@@ -181,6 +183,24 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
     ? (wonOrders.reduce((s, o) => s + ((o.pnl || 0) / o.totalCost) * 100, 0) / wonOrders.length)
     : 0;
 
+  // Compute unrealized P&L from live paper prices
+  const hasPrices = Object.keys(paperPrices).length > 0;
+  let unrealizedPnl = 0;
+  let currentMarketValue = 0;
+  if (hasPrices) {
+    openOrders.forEach(o => {
+      const priceData = paperPrices[o.conditionId];
+      if (priceData && priceData.outcomePrices[o.outcomeIndex] != null) {
+        const curPrice = priceData.outcomePrices[o.outcomeIndex];
+        const val = curPrice * o.quantity;
+        currentMarketValue += val;
+        unrealizedPnl += val - o.totalCost;
+      } else {
+        currentMarketValue += o.totalCost;
+      }
+    });
+  }
+
   const tabs: { id: OrderTab; label: string; count: number; icon: string; color: string; activeColor: string }[] = [
     { id: "active",    label: t("orders.tabActive"),    count: openOrders.length,      icon: "⚡", color: "text-blue-400",   activeColor: "bg-blue-500"    },
     { id: "won",       label: t("orders.tabWon"),       count: wonOrders.length,       icon: "🏆", color: "text-green-400",  activeColor: "bg-green-500"   },
@@ -192,12 +212,24 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
     <div className="space-y-4">
       {/* ── Hero Stats ──────────────────────────────────── */}
       <div className="bg-bot-card border border-bot-border rounded-2xl p-5">
-        <div className="grid grid-cols-6 gap-4">
+        <div className="grid grid-cols-7 gap-4">
           {/* Balance en juego */}
           <div className="col-span-1">
             <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{t("orders.inPlay")}</div>
             <div className="text-2xl font-black text-yellow-400">${totalInvested.toFixed(2)}</div>
             <div className="text-xs text-gray-500 mt-0.5">{openOrders.length} {t("orders.positions")}</div>
+          </div>
+          {/* Valor actual (live) */}
+          <div className="col-span-1">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">VALOR ACTUAL</div>
+            <div className={`text-2xl font-black ${hasPrices && openOrders.length > 0 ? (unrealizedPnl >= 0 ? "text-green-400" : "text-red-400") : "text-gray-400"}`}>
+              {hasPrices && openOrders.length > 0 ? `$${currentMarketValue.toFixed(2)}` : "---"}
+            </div>
+            {hasPrices && openOrders.length > 0 && (
+              <div className={`text-xs mt-0.5 font-bold ${unrealizedPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {unrealizedPnl >= 0 ? "+" : ""}{unrealizedPnl.toFixed(2)} ({totalInvested > 0 ? ((unrealizedPnl / totalInvested) * 100).toFixed(1) : "0"}%)
+              </div>
+            )}
           </div>
           {/* Pago potencial */}
           <div className="col-span-1">
@@ -276,7 +308,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity }
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {openOrders.map(order => (
-                <ActiveOrderCard key={order.id} order={order} onCancel={handleCancelOrder} />
+                <ActiveOrderCard key={order.id} order={order} onCancel={handleCancelOrder} paperPrices={paperPrices} />
               ))}
             </div>
           )}
@@ -580,7 +612,7 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
 
 // ─── Active Order Card ───────────────────────────────────
 
-function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o: PaperOrder) => void }) {
+function ActiveOrderCard({ order, onCancel, paperPrices }: { order: PaperOrder; onCancel: (o: PaperOrder) => void; paperPrices: PaperPriceMap }) {
   const [expanded, setExpanded] = useState(false);
   const { t, locale } = useTranslation();
   const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sí";
@@ -590,6 +622,13 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
   const resolutionInfo = formatResolutionEstimate(order.endDate, t);
   const progress = getTimeProgress(order.createdAt, order.endDate);
   const hasAI = !!order.aiReasoning;
+
+  // Live price from Gamma API
+  const priceData = paperPrices[order.conditionId];
+  const currentPrice = priceData?.outcomePrices?.[order.outcomeIndex] ?? null;
+  const currentValue = currentPrice != null ? currentPrice * order.quantity : null;
+  const unrealizedPnl = currentValue != null ? currentValue - order.totalCost : null;
+  const pnlPct = unrealizedPnl != null && order.totalCost > 0 ? (unrealizedPnl / order.totalCost) * 100 : null;
 
   return (
     <div 
@@ -625,7 +664,7 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
           </div>
         </div>
 
-        {/* Row 2: Position + Price + Shares */}
+        {/* Row 2: Position + Price + Shares + Live Price */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wide
             ${isYes
@@ -637,10 +676,29 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
           </span>
           <div className="flex items-center gap-1 text-xs text-gray-400">
             <span className="font-mono font-bold text-white">{probPct}¢</span>
+            {currentPrice != null && (
+              <>
+                <span>→</span>
+                <span className={`font-mono font-bold ${currentPrice > order.price ? "text-green-400" : currentPrice < order.price ? "text-red-400" : "text-white"}`}>
+                  {(currentPrice * 100).toFixed(0)}¢
+                </span>
+              </>
+            )}
             <span>×</span>
             <span className="font-mono font-bold text-white">{order.quantity.toFixed(1)}</span>
             <span>{t("orders.shares")}</span>
           </div>
+          {/* Live P&L badge */}
+          {unrealizedPnl != null && (
+            <span className={`ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-black
+              ${unrealizedPnl >= 0
+                ? "bg-green-500/15 text-green-400 border border-green-500/25"
+                : "bg-red-500/15 text-red-400 border border-red-500/25"
+              }`}>
+              {unrealizedPnl >= 0 ? "+" : ""}{unrealizedPnl.toFixed(2)}
+              <span className="text-[9px] opacity-70">({pnlPct != null ? (pnlPct >= 0 ? "+" : "") + pnlPct.toFixed(0) + "%" : ""})</span>
+            </span>
+          )}
           {hasAI && (
             <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded font-bold ${
               order.aiReasoning!.claudeAnalysis.confidence >= 70 ? "bg-green-500/15 text-green-400" :
@@ -653,11 +711,19 @@ function ActiveOrderCard({ order, onCancel }: { order: PaperOrder; onCancel: (o:
         </div>
 
         {/* Row 3: Stats bar */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className={`grid ${currentValue != null ? "grid-cols-4" : "grid-cols-3"} gap-2`}>
           <div className="bg-gradient-to-br from-yellow-500/10 to-yellow-600/5 border border-yellow-500/15 rounded-xl px-3 py-2.5">
             <div className="text-[9px] text-yellow-500/70 uppercase font-bold tracking-wider">{t("orders.invested")}</div>
             <div className="text-base font-black text-yellow-400 mt-0.5">${order.totalCost.toFixed(2)}</div>
           </div>
+          {currentValue != null && (
+            <div className={`bg-gradient-to-br ${unrealizedPnl! >= 0 ? "from-green-500/10 to-green-600/5 border-green-500/15" : "from-red-500/10 to-red-600/5 border-red-500/15"} border rounded-xl px-3 py-2.5`}>
+              <div className={`text-[9px] uppercase font-bold tracking-wider ${unrealizedPnl! >= 0 ? "text-green-500/70" : "text-red-500/70"}`}>VALOR ACTUAL</div>
+              <div className={`text-base font-black mt-0.5 ${unrealizedPnl! >= 0 ? "text-green-400" : "text-red-400"}`}>
+                ${currentValue.toFixed(2)}
+              </div>
+            </div>
+          )}
           <div className="bg-gradient-to-br from-cyan-500/10 to-cyan-600/5 border border-cyan-500/15 rounded-xl px-3 py-2.5">
             <div className="text-[9px] text-cyan-500/70 uppercase font-bold tracking-wider">{t("orders.ifWin")}</div>
             <div className="text-base font-black text-cyan-400 mt-0.5">${order.potentialPayout.toFixed(2)}</div>
