@@ -30,7 +30,7 @@ import {
   calculateStats,
   getBalanceHistory,
 } from "./services/paperTrading";
-import { fetchAllMarkets, fetchPaperOrderPrices, PaperPriceMap } from "./services/polymarket";
+import { fetchAllMarkets, fetchPaperOrderPrices, PaperPriceMap, PaperOrderRef } from "./services/polymarket";
 import { WalletInfo } from "./services/wallet";
 import { clearCachedCreds } from "./services/clobAuth";
 import { runSmartCycle, setMaxExpiry, clearAnalyzedCache } from "./services/smartTrader";
@@ -167,12 +167,12 @@ function App() {
   const loadPaperPrices = useCallback(async () => {
     const orders = portfolioRef.current.openOrders;
     if (orders.length === 0) return;
-    const conditionIds = orders
-      .map(o => o.conditionId)
-      .filter(Boolean);
-    if (conditionIds.length === 0) return;
+    const refs: PaperOrderRef[] = orders
+      .filter(o => o.marketId)
+      .map(o => ({ conditionId: o.conditionId, marketId: o.marketId }));
+    if (refs.length === 0) return;
     try {
-      const prices = await fetchPaperOrderPrices(conditionIds);
+      const prices = await fetchPaperOrderPrices(refs);
       setPaperPrices(prices);
     } catch {
       // Silently ignore — will retry on next interval
