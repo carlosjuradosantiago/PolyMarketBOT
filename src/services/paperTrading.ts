@@ -73,22 +73,15 @@ export function createPaperOrder(
   // Calculate cost
   const totalCost = quantity * price;
 
-  // ═══ HARD SAFETY: No single bet can exceed 10% of EQUITY ═══
-  // Equity = cash balance + money invested in open orders (same as Kelly sizing)
-  const investedInOrders = portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
-  const equity = portfolio.balance + investedInOrders;
-  const MAX_SINGLE_BET_PCT = 0.10;
-  const maxAllowed = equity * MAX_SINGLE_BET_PCT;
-  if (totalCost > maxAllowed && totalCost > 15) {
-    return {
-      order: null,
-      portfolio,
-      error: `Bet $${totalCost.toFixed(2)} exceeds 10% of equity ($${maxAllowed.toFixed(2)}). Hard cap enforced.`,
-    };
-  }
+  // NOTE: 10% equity cap is handled by Kelly strategy (kellyStrategy.ts).
+  // No duplicate hard cap here — it was causing false rejections when
+  // balance (cash) dropped after earlier bets in the same cycle, even though
+  // equity (cash + invested) remained the same.
   
   // Check available cash
   if (totalCost > portfolio.balance) {
+    const investedInOrders = portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
+    const equity = portfolio.balance + investedInOrders;
     return {
       order: null,
       portfolio,

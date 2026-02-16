@@ -126,10 +126,12 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
       return;
     }
 
-    // ═══ HARD CAP: max 10% of balance per bet ═══
-    const maxBet = portfolio.balance * 0.10;
+    // ═══ HARD CAP: max 10% of equity per manual bet ═══
+    const invested = portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
+    const equity = portfolio.balance + invested;
+    const maxBet = equity * 0.10;
     if (amount > maxBet) {
-      onActivity(`Max bet is $${maxBet.toFixed(2)} (10% of balance)`, "Warning");
+      onActivity(`Max bet is $${maxBet.toFixed(2)} (10% of equity $${equity.toFixed(2)})`, "Warning");
       return;
     }
 
