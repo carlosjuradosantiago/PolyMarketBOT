@@ -125,30 +125,31 @@ function App() {
 
     // Load wallet info
     loadWalletInfo();
+
+    // Refresh wallet positions every 10 seconds for near-real-time price updates
+    const walletInterval = setInterval(loadWalletInfo, 10_000);
+    return () => clearInterval(walletInterval);
   }, []);
   
   // Load real wallet balance via secure server proxy (private key never in browser)
+  const walletLoadCount = useRef(0);
   const loadWalletInfo = async () => {
     try {
       const resp = await fetch("/api/wallet");
       if (!resp.ok) return;
       const info = await resp.json();
       setWalletInfo(info);
-      if (info.isValid && info.balance) {
+      // Only log details on first load
+      if (walletLoadCount.current === 0 && info.isValid && info.balance) {
         console.log(`[Wallet] Connected: ${info.address}`);
         console.log(`[Wallet] USDC: $${info.balance.usdc.toFixed(2)}, MATIC: ${info.balance.matic.toFixed(4)}`);
-        if (info.openOrders?.count > 0) {
-          console.log(`[Wallet] Real open orders: ${info.openOrders.count}, locked: $${info.openOrders.totalLocked.toFixed(2)}`);
-        }
         if (info.openOrders?.positions?.length > 0) {
           console.log(`[Wallet] Real positions: ${info.openOrders.positions.length}, value: $${info.openOrders.totalPositionValue?.toFixed(2)}, P&L: $${info.openOrders.totalPnl?.toFixed(2)}`);
-          for (const pos of info.openOrders.positions) {
-            console.log(`  → ${pos.outcome} ${pos.shares} shares @ avg $${pos.avgPrice.toFixed(4)}, current: $${pos.currentPrice?.toFixed(4) ?? '?'}, value: $${pos.currentValue?.toFixed(2) ?? '?'}`);
-          }
         }
       }
+      walletLoadCount.current++;
     } catch (e) {
-      console.error("Error loading wallet:", e);
+      if (walletLoadCount.current === 0) console.error("Error loading wallet:", e);
     }
   };
 

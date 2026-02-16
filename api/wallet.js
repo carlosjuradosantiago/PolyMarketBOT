@@ -382,7 +382,6 @@ async function fetchOpenOrders(wallet, apiCreds) {
       positions,
       totalPositionValue: Math.round(totalPositionValue * 100) / 100,
       totalPnl: Math.round(totalPnl * 100) / 100,
-      _debug: debug,
     };
   } catch (err) {
     console.error("[Wallet] Open orders error:", err.message);
@@ -436,7 +435,6 @@ export default async function handler(req, res) {
       balance,
       polymarketBalance: pmResult.balance,
       openOrders: ordersInfo,
-      _debug: pmResult.debug,
       isValid: true,
     });
   } catch (err) {
