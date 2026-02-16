@@ -831,8 +831,6 @@ export async function fetchPaperOrderPrices(
     if (o.marketId) marketToCondition.set(o.marketId, o.conditionId);
   }
   const uniqueMarketIds = [...marketToCondition.keys()];
-  console.log("[PaperPrices] Orders:", orders.length, "Unique marketIds:", uniqueMarketIds.length, "IDs:", uniqueMarketIds.slice(0, 5));
-  console.log("[PaperPrices] Sample order refs:", orders.slice(0, 3).map(o => ({ mId: o.marketId, cId: o.conditionId?.slice(0, 16) })));
   if (uniqueMarketIds.length === 0) return {};
 
   const results: PaperPriceMap = {};
@@ -843,32 +841,26 @@ export async function fetchPaperOrderPrices(
     const batch = uniqueMarketIds.slice(i, i + BATCH_SIZE);
     const promises = batch.map(async (mid) => {
       try {
-        // Always use /markets/{id} — the ?condition_id= param is broken on Gamma
         const url = `${GAMMA_API}/markets/${mid}`;
-        console.log("[PaperPrices] Fetching:", url);
         const resp = await fetch(url);
-        console.log("[PaperPrices] Response for", mid, ":", resp.status, resp.ok);
         if (!resp.ok) return;
         const market = await resp.json();
-        if (!market) { console.log("[PaperPrices] No market data for", mid); return; }
+        if (!market) return;
 
         const prices = market.outcomePrices || market.outcome_prices;
-        console.log("[PaperPrices] Market", mid, "prices:", prices, "conditionId:", market.conditionId?.slice(0, 16));
-        if (!prices) { console.log("[PaperPrices] No prices field for", mid); return; }
+        if (!prices) return;
         const parsed = typeof prices === "string" ? JSON.parse(prices) : prices;
         const cid = marketToCondition.get(mid) || mid;
         results[cid] = {
           outcomePrices: parsed.map((p: string | number) => parseFloat(String(p))),
           question: market.question,
         };
-        console.log("[PaperPrices] Stored for conditionId", cid?.slice(0, 16), "→ prices:", results[cid].outcomePrices);
-      } catch (err) {
-        console.error("[PaperPrices] Error fetching", mid, ":", err);
+      } catch {
+        // Silently skip failed lookups
       }
     });
     await Promise.all(promises);
   }
 
-  console.log("[PaperPrices] Final results:", Object.keys(results).length, "markets with prices");
   return results;
 }
