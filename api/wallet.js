@@ -292,7 +292,7 @@ async function fetchOpenOrders(wallet, apiCreds) {
       if (p.shares <= 0.001) continue; // Skip closed positions
       p.avgPrice = p.shares > 0 ? p.totalCost / p.shares : 0;
 
-      // Try to get current price from CLOB
+      // Try to get current price from CLOB (multiple endpoints)
       let currentPrice = null;
       try {
         const priceResp = await fetch(`${CLOB_BASE}/price?token_id=${aid}&side=sell`);
@@ -302,7 +302,6 @@ async function fetchOpenOrders(wallet, apiCreds) {
         }
       } catch {}
 
-      // Also try the market midpoint
       if (!currentPrice) {
         try {
           const midResp = await fetch(`${CLOB_BASE}/midpoint?token_id=${aid}`);
@@ -313,9 +312,38 @@ async function fetchOpenOrders(wallet, apiCreds) {
         } catch {}
       }
 
+      // Try last trade price endpoint
+      if (!currentPrice) {
+        try {
+          const lastResp = await fetch(`${CLOB_BASE}/last-trade-price?token_id=${aid}`);
+          if (lastResp.ok) {
+            const lastData = await lastResp.json();
+            currentPrice = parseFloat(lastData.price || "0");
+          }
+        } catch {}
+      }
+
+      // If still no price, use avg price as fallback estimate
+      if (!currentPrice) {
+        currentPrice = p.avgPrice;
+      }
+
+      // Try to get market name from Gamma API
+      let marketName = null;
+      try {
+        const marketResp = await fetch(`https://gamma-api.polymarket.com/markets?clob_token_ids=${aid}&limit=1`);
+        if (marketResp.ok) {
+          const markets = await marketResp.json();
+          if (Array.isArray(markets) && markets.length > 0) {
+            marketName = markets[0].question || markets[0].title || null;
+          }
+        }
+      } catch {}
+
       positions.push({
         asset_id: aid,
         market: p.market,
+        marketName,
         outcome: p.outcome,
         shares: Math.round(p.shares * 10000) / 10000,
         avgPrice: Math.round(p.avgPrice * 10000) / 10000,

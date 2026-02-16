@@ -26,38 +26,57 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
           {t("card.polymarket")}
         </div>
         <div className="text-2xl font-bold text-bot-green">
-          {walletInfo?.polymarketBalance != null
-            ? `$${walletInfo.polymarketBalance.toFixed(2)}`
-            : walletInfo?.balance?.usdc != null
-              ? `$${walletInfo.balance.usdc.toFixed(2)}`
-              : "---"}
+          {(() => {
+            const cash = walletInfo?.polymarketBalance ?? walletInfo?.balance?.usdc ?? null;
+            const posValue = walletInfo?.openOrders?.totalPositionValue ?? 0;
+            const total = (cash ?? 0) + posValue;
+            return cash != null ? `$${total.toFixed(2)}` : "---";
+          })()}
         </div>
         <div className="text-xs text-bot-muted mt-1 truncate" title={walletInfo?.address}>
           {walletInfo?.isValid ? (
             <>
               {formatAddress(walletInfo.address)}
-              {/* Show positions if any */}
+              {/* Show positions summary */}
               {walletInfo.openOrders?.positions && walletInfo.openOrders.positions.length > 0 ? (
                 <span className="ml-1 text-cyan-400">
-                  📊 {walletInfo.openOrders.positions.length} {walletInfo.openOrders.positions.length === 1 ? "posición" : "posiciones"} (${walletInfo.openOrders.totalPositionValue.toFixed(2)})
+                  📊 {walletInfo.openOrders.positions.length} pos
                   {walletInfo.openOrders.totalPnl !== 0 && (
-                    <span className={walletInfo.openOrders.totalPnl >= 0 ? "text-bot-green" : "text-bot-red"}>
+                    <span className={walletInfo.openOrders.totalPnl >= 0 ? " text-bot-green" : " text-bot-red"}>
                       {" "}{walletInfo.openOrders.totalPnl >= 0 ? "+" : ""}${walletInfo.openOrders.totalPnl.toFixed(2)}
                     </span>
                   )}
                 </span>
               ) : walletInfo.openOrders && walletInfo.openOrders.count > 0 ? (
                 <span className="ml-1 text-yellow-400">
-                  📋 {walletInfo.openOrders.count} {walletInfo.openOrders.count === 1 ? "orden" : "órdenes"} (${walletInfo.openOrders.totalLocked.toFixed(2)})
-                </span>
-              ) : walletInfo.balance != null ? (
-                <span className="ml-1 text-gray-600">
-                  (wallet: ${walletInfo.balance.usdc.toFixed(2)})
+                  📋 {walletInfo.openOrders.count} {walletInfo.openOrders.count === 1 ? "orden" : "órdenes"}
                 </span>
               ) : null}
             </>
           ) : t("card.notConnected")}
         </div>
+        {/* Position details */}
+        {walletInfo?.openOrders?.positions && walletInfo.openOrders.positions.length > 0 && (
+          <div className="mt-1.5 space-y-0.5">
+            {walletInfo.openOrders.positions.map((pos, i) => (
+              <div key={i} className="text-[10px] text-gray-400 truncate" title={pos.marketName || pos.market}>
+                <span className="text-cyan-500">{pos.outcome}</span>
+                {" "}{pos.shares.toFixed(1)} @${pos.avgPrice.toFixed(2)}
+                {pos.currentPrice != null && (
+                  <>
+                    {" → $"}{pos.currentPrice.toFixed(2)}
+                    <span className={(pos.pnl ?? 0) >= 0 ? " text-bot-green" : " text-bot-red"}>
+                      {" "}{(pos.pnl ?? 0) >= 0 ? "+" : ""}${(pos.pnl ?? 0).toFixed(2)}
+                    </span>
+                  </>
+                )}
+                {pos.marketName && (
+                  <span className="text-gray-600"> — {pos.marketName.length > 40 ? pos.marketName.slice(0, 40) + "…" : pos.marketName}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Paper Balance (Equity = cash + invested) */}
