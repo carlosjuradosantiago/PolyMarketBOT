@@ -27,19 +27,35 @@ export interface RealOrder {
   asset_id: string;
   side: string;
   price: number;
-  original_size: number;
-  size_matched: number;
   remaining: number;
   cost: number;
   outcome: string;
-  created_at: number;
+}
+
+export interface RealPosition {
+  asset_id: string;
+  market: string;
+  outcome: string;
+  shares: number;
+  avgPrice: number;
+  currentPrice: number | null;
+  totalCost: number;
+  currentValue: number | null;
+  pnl: number | null;
 }
 
 export interface WalletInfo {
   address: string;
   balance: WalletBalance | null;        // On-chain (Polygon)
   polymarketBalance: number | null;     // USDC deposited in Polymarket
-  openOrders: { count: number; totalLocked: number; orders: RealOrder[] } | null;
+  openOrders: {
+    count: number;
+    totalLocked: number;
+    orders: RealOrder[];
+    positions: RealPosition[];
+    totalPositionValue: number;
+    totalPnl: number;
+  } | null;
   isValid: boolean;
 }
 

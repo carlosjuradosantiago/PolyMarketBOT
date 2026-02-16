@@ -140,6 +140,12 @@ function App() {
         if (info.openOrders?.count > 0) {
           console.log(`[Wallet] Real open orders: ${info.openOrders.count}, locked: $${info.openOrders.totalLocked.toFixed(2)}`);
         }
+        if (info.openOrders?.positions?.length > 0) {
+          console.log(`[Wallet] Real positions: ${info.openOrders.positions.length}, value: $${info.openOrders.totalPositionValue?.toFixed(2)}, P&L: $${info.openOrders.totalPnl?.toFixed(2)}`);
+          for (const pos of info.openOrders.positions) {
+            console.log(`  → ${pos.outcome} ${pos.shares} shares @ avg $${pos.avgPrice.toFixed(4)}, current: $${pos.currentPrice?.toFixed(4) ?? '?'}, value: $${pos.currentValue?.toFixed(2) ?? '?'}`);
+          }
+        }
       }
     } catch (e) {
       console.error("Error loading wallet:", e);
