@@ -215,85 +215,124 @@ async function fetchPolymarketBalance(wallet, apiCreds) {
 
 async function fetchOpenOrders(wallet, apiCreds) {
   try {
-    // Try both endpoints: /data/orders?state=OPEN and /data/open-orders
-    const endpoints = [
-      { path: "/data/orders", params: "?state=OPEN&next_cursor=MA==" },
-      { path: "/data/open-orders", params: "?next_cursor=MA==" },
-    ];
     const debug = [];
-    
-    for (const ep of endpoints) {
+
+    // 1. Query ALL orders (no state filter) to see full history
+    const allOrdersEndpoints = [
+      { path: "/data/orders", params: "?next_cursor=MA==" },
+      { path: "/data/orders", params: "?state=OPEN&next_cursor=MA==" },
+      { path: "/data/orders", params: "?state=LIVE&next_cursor=MA==" },
+      { path: "/data/orders", params: "?state=MATCHED&next_cursor=MA==" },
+    ];
+
+    let foundOrders = [];
+
+    for (const ep of allOrdersEndpoints) {
       const headers = createL2Headers(apiCreds, wallet.address, "GET", ep.path);
       const url = `${CLOB_BASE}${ep.path}${ep.params}`;
       const response = await fetch(url, { method: "GET", headers });
-      
+
       if (!response.ok) {
         const text = await response.text().catch(() => "");
-        debug.push({ endpoint: ep.path, status: response.status, error: text.slice(0, 200) });
+        debug.push({ endpoint: `${ep.path}${ep.params}`, status: response.status, error: text.slice(0, 200) });
         continue;
       }
 
       const body = await response.json();
-      debug.push({ 
-        endpoint: ep.path, 
+      const orders = Array.isArray(body.data) ? body.data : (Array.isArray(body) ? body : []);
+      debug.push({
+        endpoint: `${ep.path}${ep.params}`,
         status: 200,
-        responseKeys: Object.keys(body), 
-        dataLen: Array.isArray(body.data) ? body.data.length : (Array.isArray(body) ? body.length : "not-array"), 
+        count: body.count ?? orders.length,
+        dataLen: orders.length,
         nextCursor: body.next_cursor,
-        sample: JSON.stringify(body).slice(0, 300),
+        sample: orders.length > 0 ? JSON.stringify(orders[0]).slice(0, 500) : "empty",
       });
 
-      // Extract orders from response
-      let allOrders = [];
-      if (body && Array.isArray(body.data)) {
-        allOrders = body.data;
-        // Fetch remaining pages
-        let nextCursor = body.next_cursor;
-        const END_CURSOR = "LTE=";
-        while (nextCursor && nextCursor !== END_CURSOR) {
-          const pageHeaders = createL2Headers(apiCreds, wallet.address, "GET", ep.path);
-          const pageResp = await fetch(`${CLOB_BASE}${ep.path}?state=OPEN&next_cursor=${encodeURIComponent(nextCursor)}`, {
-            method: "GET", headers: pageHeaders,
-          });
-          if (!pageResp.ok) break;
-          const pageBody = await pageResp.json();
-          if (Array.isArray(pageBody.data)) {
-            allOrders = allOrders.concat(pageBody.data);
-            nextCursor = pageBody.next_cursor;
-          } else break;
-        }
-      } else if (Array.isArray(body)) {
-        allOrders = body;
-      }
-
-      if (allOrders.length > 0) {
-        let totalLocked = 0;
-        const ordersList = allOrders.map(o => {
-          const price = parseFloat(o.price || "0");
-          const origSize = parseFloat(o.original_size || o.size || "0");
-          const matched = parseFloat(o.size_matched || "0");
-          const remaining = origSize - matched;
-          const cost = o.side === "BUY" ? price * remaining : 0;
-          totalLocked += cost;
-          return {
-            id: o.id, market: o.market, asset_id: o.asset_id,
-            side: o.side, price, original_size: origSize,
-            size_matched: matched, remaining,
-            cost: Math.round(cost * 100) / 100,
-            outcome: o.outcome, created_at: o.created_at,
-          };
-        });
-
-        return {
-          count: ordersList.length,
-          totalLocked: Math.round(totalLocked * 100) / 100,
-          orders: ordersList,
-          _debug: debug,
-        };
+      if (orders.length > 0) {
+        foundOrders = foundOrders.concat(orders);
       }
     }
 
-    // No orders found from any endpoint
+    // 2. Check trades history
+    try {
+      const tradesPath = "/data/trades";
+      const tradesHeaders = createL2Headers(apiCreds, wallet.address, "GET", tradesPath);
+      const tradesResp = await fetch(`${CLOB_BASE}${tradesPath}?next_cursor=MA==`, {
+        method: "GET", headers: tradesHeaders,
+      });
+      if (tradesResp.ok) {
+        const tradesBody = await tradesResp.json();
+        const trades = Array.isArray(tradesBody.data) ? tradesBody.data : (Array.isArray(tradesBody) ? tradesBody : []);
+        debug.push({
+          endpoint: "/data/trades",
+          status: 200,
+          count: tradesBody.count ?? trades.length,
+          dataLen: trades.length,
+          sample: trades.length > 0 ? JSON.stringify(trades[0]).slice(0, 500) : "empty",
+        });
+      } else {
+        debug.push({ endpoint: "/data/trades", status: tradesResp.status });
+      }
+    } catch (e) {
+      debug.push({ endpoint: "/data/trades", error: e.message });
+    }
+
+    // 3. Also check the derive-api-key response for proxy/funder info
+    try {
+      const l1h = await createL1Headers(wallet);
+      const deriveResp = await fetch(`${CLOB_BASE}/auth/derive-api-key`, { method: "GET", headers: l1h });
+      if (deriveResp.ok) {
+        const deriveData = await deriveResp.json();
+        debug.push({
+          endpoint: "/auth/derive-api-key",
+          status: 200,
+          keys: Object.keys(deriveData),
+          sample: JSON.stringify(deriveData).slice(0, 500),
+        });
+      }
+    } catch (e) {
+      debug.push({ endpoint: "/auth/derive-api-key", error: e.message });
+    }
+
+    // De-duplicate found orders by id
+    const uniqueOrders = [];
+    const seenIds = new Set();
+    for (const o of foundOrders) {
+      const oid = o.id || JSON.stringify(o);
+      if (!seenIds.has(oid)) {
+        seenIds.add(oid);
+        uniqueOrders.push(o);
+      }
+    }
+
+    if (uniqueOrders.length > 0) {
+      let totalLocked = 0;
+      const ordersList = uniqueOrders.map(o => {
+        const price = parseFloat(o.price || "0");
+        const origSize = parseFloat(o.original_size || o.size || "0");
+        const matched = parseFloat(o.size_matched || "0");
+        const remaining = origSize - matched;
+        const cost = o.side === "BUY" ? price * remaining : 0;
+        totalLocked += cost;
+        return {
+          id: o.id, market: o.market, asset_id: o.asset_id,
+          side: o.side, price, original_size: origSize,
+          size_matched: matched, remaining,
+          cost: Math.round(cost * 100) / 100,
+          outcome: o.outcome, created_at: o.created_at,
+          status: o.status || o.order_status || "unknown",
+        };
+      });
+
+      return {
+        count: ordersList.length,
+        totalLocked: Math.round(totalLocked * 100) / 100,
+        orders: ordersList,
+        _debug: debug,
+      };
+    }
+
     return { count: 0, totalLocked: 0, orders: [], _debug: debug };
   } catch (err) {
     console.error("[Wallet] Open orders error:", err.message);
