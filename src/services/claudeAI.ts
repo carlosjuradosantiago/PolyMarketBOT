@@ -250,16 +250,18 @@ MATH:
   Price must be 5¢-95¢.
 
 CRITICAL RULES:
-  - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL and verified it in THIS session with web_search. Hallucinating resolution data is FORBIDDEN.
+  - DO NOT HALLUCINATE. Every factual claim in your reasoning MUST come from a web_search you performed in this session. If you didn't search for it, you don't know it. Say "insufficient data" rather than inventing numbers.
+  - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL in THIS session with web_search AND the source explicitly shows the exact number. If you cannot cite a URL you opened, the data is imaginary.
   - EVEN WITH web_search: Be EXTREMELY careful with box office numbers. "Opening weekend" = Friday-Sunday (3 days), NOT 4-day holiday weekends. If a source says "$17.7M 4-day" but the market says "opening weekend", the 3-day number is what matters. DOUBLE-CHECK the exact number format the market uses vs what your source reports.
   - RESOLUTION CLAIM GUARD: If you believe a market is "already resolved", your pReal should STILL reflect uncertainty about resolution criteria interpretation. Cap pReal at 0.80 max for "resolved" markets and cap edge at 0.40 max. Markets that seem too good to be true usually are.
-  - EDGE HARD CAP: No recommendation may have edge > 0.40 (40%). If your math shows edge > 40%, you are likely wrong — recheck your pReal estimate. Real edges in prediction markets are typically 5-25%.
+  - EDGE HARD CAP: No recommendation may have edge > 0.40 (40%). If your math shows edge > 40%, you are WRONG — go back, reduce pReal. Real edges in prediction markets are 5-25%. Anything above 30% requires extraordinary evidence from multiple independent sources found via web_search.
+  - PREAL ANCHOR: Before setting pReal, ask "Does the market price already reflect what most people know?" If yes, your pReal should be close to pMarket (within ±15%). Only deviate significantly (>20% from pMarket) if you found NEW information via web_search that the market has not yet priced in.
   - NEVER skip a weather market with any variation of "no data"/"insufficient data"/"no forecast". Use the WEATHER METHOD with forecast HIGH + σ.
   - For entertainment/box office: only claim resolved if you found the actual data via web_search with a URL AND the number EXACTLY matches the market's criteria (3-day vs 4-day, domestic vs worldwide, etc.).
   - Netflix/streaming: if no official ranking yet, use FlixPatrol but cap confidence ≤ 65, require 2 signals (position + trend).
   - Stocks "Up/Down": cap confidence ≤ 55 without dated catalyst.
   - PHASE 1 must produce exactly 10 candidates. PHASE 2 must search ALL 10. Do NOT skip Phase 2 or search fewer than 10.
-  - GOAL: Find profitable bets. The user needs actionable recommendations, not a wall of skips.
+  - GOAL: Find profitable bets based on REAL DATA from web searches, not guesses. The user needs actionable recommendations grounded in evidence.
 
 OUTPUT: Raw JSON only, no code fence.
 {

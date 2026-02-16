@@ -37,17 +37,17 @@ const SCAN_INTERVAL_SECS = 86400;         // 24 hours between cycles (daily 6am 
 // Minimum liquidity/volume/price thresholds imported from marketConstants.ts
 // (single source of truth shared with polymarket.ts Bot View)
 
-// Time throttle: enforce minimum 10 minutes between Claude API calls.
+// Time throttle: enforce minimum 20 HOURS between Claude API calls.
 // Markets are re-analyzed each cycle because prices/conditions change constantly.
-// ALL state persisted in sessionStorage to survive Vite HMR reloads.
-let _lastClaudeCallTime = Number(sessionStorage.getItem('_smartTrader_lastClaudeCall') || '0');
-const MIN_CLAUDE_INTERVAL_MS = 60 * 60 * 1000;    // HARD minimum: 1 hour between Claude calls (daily schedule)
+// ALL state persisted in localStorage to survive page reloads AND tab closures.
+let _lastClaudeCallTime = Number(localStorage.getItem('_smartTrader_lastClaudeCall') || '0');
+const MIN_CLAUDE_INTERVAL_MS = 20 * 60 * 60 * 1000;    // HARD minimum: 20 hours between Claude calls (daily schedule)
 
-/** Persist throttle timestamp to sessionStorage (survives HMR, cleared on tab close) */
+/** Persist throttle timestamp to localStorage (survives page reload + tab close) */
 function _persistThrottleState() {
   try {
-    sessionStorage.setItem('_smartTrader_lastClaudeCall', String(_lastClaudeCallTime));
-  } catch { /* sessionStorage full or unavailable — ignore */ }
+    localStorage.setItem('_smartTrader_lastClaudeCall', String(_lastClaudeCallTime));
+  } catch { /* localStorage full or unavailable — ignore */ }
 }
 
 // ─── Recently-analyzed cache: avoid re-sending same markets to Claude ──
@@ -56,11 +56,11 @@ function _persistThrottleState() {
 // TTL MUST match throttle interval — otherwise with a 35-market pool and 30min TTL,
 // cycles 2 & 3 see only 5-8 markets because 30 are still "recently analyzed".
 const ANALYZED_CACHE_KEY = '_smartTrader_analyzedMap';
-const ANALYZED_CACHE_TTL_MS = MIN_CLAUDE_INTERVAL_MS; // = 1 hour, prevents rapid re-analysis on manual runs
+const ANALYZED_CACHE_TTL_MS = MIN_CLAUDE_INTERVAL_MS; // = 20 hours, prevents rapid re-analysis on page reload
 
 function _loadAnalyzedMap(): Map<string, number> {
   try {
-    const raw = sessionStorage.getItem(ANALYZED_CACHE_KEY);
+    const raw = localStorage.getItem(ANALYZED_CACHE_KEY);
     if (!raw) return new Map();
     const entries: [string, number][] = JSON.parse(raw);
     const now = Date.now();
@@ -71,7 +71,7 @@ function _loadAnalyzedMap(): Map<string, number> {
 
 function _saveAnalyzedMap(map: Map<string, number>) {
   try {
-    sessionStorage.setItem(ANALYZED_CACHE_KEY, JSON.stringify([...map.entries()]));
+    localStorage.setItem(ANALYZED_CACHE_KEY, JSON.stringify([...map.entries()]));
   } catch { /* ignore */ }
 }
 
@@ -84,7 +84,7 @@ function _markAnalyzed(marketIds: string[]) {
 
 /**
  * Cycle lock — prevents concurrent cycles (React StrictMode, double-triggers, HMR).
- * PERSISTED in sessionStorage with a TTL (max 3 min) to survive HMR but auto-expire
+ * PERSISTED in localStorage with a TTL (max 3 min) to survive reloads but auto-expire
  * if the tab crashed or the cycle hung.
  */
 const CYCLE_LOCK_KEY = '_smartTrader_cycleLock';
@@ -92,7 +92,7 @@ const CYCLE_LOCK_MAX_MS = 3 * 60 * 1000; // Lock expires after 3 min max
 
 function _isCycleLocked(): boolean {
   try {
-    const raw = sessionStorage.getItem(CYCLE_LOCK_KEY);
+    const raw = localStorage.getItem(CYCLE_LOCK_KEY);
     if (!raw) return false;
     const lockTime = Number(raw);
     if (isNaN(lockTime)) return false;
@@ -102,11 +102,11 @@ function _isCycleLocked(): boolean {
 }
 
 function _setCycleLock() {
-  try { sessionStorage.setItem(CYCLE_LOCK_KEY, String(Date.now())); } catch {}
+  try { localStorage.setItem(CYCLE_LOCK_KEY, String(Date.now())); } catch {}
 }
 
 function _clearCycleLock() {
-  try { sessionStorage.removeItem(CYCLE_LOCK_KEY); } catch {}
+  try { localStorage.removeItem(CYCLE_LOCK_KEY); } catch {}
 }
 
 let _cycleRunning = false;
@@ -211,8 +211,8 @@ export function clearAnalyzedCache(): void {
   _persistThrottleState();
   _clearCycleLock();
   _cycleRunning = false;
-  sessionStorage.removeItem('_smartTrader_analyzedIds'); // cleanup legacy key
-  sessionStorage.removeItem(ANALYZED_CACHE_KEY); // clear recently-analyzed cache
+  localStorage.removeItem('_smartTrader_analyzedIds'); // cleanup legacy key
+  localStorage.removeItem(ANALYZED_CACHE_KEY); // clear recently-analyzed cache
   log("🧹 Throttle de IA reseteado + cycle lock + cache analizados limpiado");
 }
 
@@ -545,7 +545,7 @@ export async function runSmartCycle(
   claudeModel?: string,
 ): Promise<SmartCycleResult> {
   // ─── Cycle Lock: prevent concurrent execution ─────
-  // Check BOTH in-memory flag AND sessionStorage (survives HMR)
+  // Check BOTH in-memory flag AND localStorage (survives reload)
   if (_cycleRunning || _isCycleLocked()) {
     log("⚠️ Ciclo ya en ejecución — ignorando llamada duplicada (lock activo)");
     return {
