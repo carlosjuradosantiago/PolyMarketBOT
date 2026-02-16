@@ -251,8 +251,11 @@ MATH:
 
 CRITICAL RULES:
   - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL and verified it in THIS session with web_search. Hallucinating resolution data is FORBIDDEN.
+  - EVEN WITH web_search: Be EXTREMELY careful with box office numbers. "Opening weekend" = Friday-Sunday (3 days), NOT 4-day holiday weekends. If a source says "$17.7M 4-day" but the market says "opening weekend", the 3-day number is what matters. DOUBLE-CHECK the exact number format the market uses vs what your source reports.
+  - RESOLUTION CLAIM GUARD: If you believe a market is "already resolved", your pReal should STILL reflect uncertainty about resolution criteria interpretation. Cap pReal at 0.80 max for "resolved" markets and cap edge at 0.40 max. Markets that seem too good to be true usually are.
+  - EDGE HARD CAP: No recommendation may have edge > 0.40 (40%). If your math shows edge > 40%, you are likely wrong — recheck your pReal estimate. Real edges in prediction markets are typically 5-25%.
   - NEVER skip a weather market with any variation of "no data"/"insufficient data"/"no forecast". Use the WEATHER METHOD with forecast HIGH + σ.
-  - For entertainment/box office: only claim resolved if you found the actual data via web_search with a URL.
+  - For entertainment/box office: only claim resolved if you found the actual data via web_search with a URL AND the number EXACTLY matches the market's criteria (3-day vs 4-day, domestic vs worldwide, etc.).
   - Netflix/streaming: if no official ranking yet, use FlixPatrol but cap confidence ≤ 65, require 2 signals (position + trend).
   - Stocks "Up/Down": cap confidence ≤ 55 without dated catalyst.
   - PHASE 1 must produce exactly 10 candidates. PHASE 2 must search ALL 10. Do NOT skip Phase 2 or search fewer than 10.
@@ -528,6 +531,20 @@ export async function analyzeMarketsWithClaude(
         });
     }
 
+    // ── CODE-LEVEL EDGE GUARD: reject any recommendation with edge > 40% ──
+    const MAX_EDGE = 0.40;
+    const preGuardCount = analyses.length;
+    analyses = analyses.filter((a) => {
+      if (a.edge > MAX_EDGE) {
+        log(`🚫 EDGE GUARD: Rejected "${a.question}" — edge ${(a.edge * 100).toFixed(1)}% > ${MAX_EDGE * 100}% cap (pReal=${a.pReal}, pMarket=${a.pMarket}). Likely hallucinated resolution.`);
+        return false;
+      }
+      return true;
+    });
+    if (preGuardCount > analyses.length) {
+      log(`⚠️ EDGE GUARD removed ${preGuardCount - analyses.length} recommendation(s) with suspiciously high edge`);
+    }
+
     log(`📋 Recommendations: ${analyses.length}`);
   } catch (parseError) {
     log("⚠️ Error parseando respuesta de Claude:", parseError);
@@ -613,6 +630,16 @@ Output ONLY valid JSON (no code fence, no extra text):
                   executionNotes: item.executionNotes || undefined,
                 };
               });
+            // ── CODE-LEVEL EDGE GUARD (retry path) ──
+            const preGuardRetry = analyses.length;
+            analyses = analyses.filter((a) => {
+              if (a.edge > 0.40) {
+                log(`🚫 EDGE GUARD (retry): Rejected "${a.question}" — edge ${(a.edge * 100).toFixed(1)}%`);
+                return false;
+              }
+              return true;
+            });
+            if (preGuardRetry > analyses.length) log(`⚠️ EDGE GUARD (retry) removed ${preGuardRetry - analyses.length} rec(s)`);
             summary = retryParsed.summary || "(retry sin web_search)";
             if (Array.isArray(retryParsed.skipped)) {
               skippedMarkets = retryParsed.skipped.map((s: any) => ({ marketId: s.marketId || "", question: s.question || "", reason: s.reason || "" }));
