@@ -347,9 +347,9 @@ function parseBalanceResponse(data: Record<string, unknown>): PolymarketBalance 
   const balNum = parseFloat(rawBalance);
   const allNum = parseFloat(rawAllowance);
 
-  // USDC has 6 decimals — values > 1M are likely minor units
-  const collateral = balNum > 1_000_000 ? balNum / 1e6 : balNum;
-  const allowance = allNum > 1_000_000 ? allNum / 1e6 : allNum;
+  // USDC has 6 decimals — CLOB API returns raw minor units (same format as allowances)
+  const collateral = balNum / 1e6;
+  const allowance = allNum / 1e6;
 
   console.log(`[CLOB] Polymarket balance: $${collateral.toFixed(2)} USDC, allowance: $${allowance.toFixed(2)}`);
   return { collateral, allowance };

@@ -194,7 +194,8 @@ async function fetchPolymarketBalance(wallet, apiCreds) {
       const data = await response.json();
       const rawBalance = String(data.balance ?? data.collateral ?? "0");
       const balNum = parseFloat(rawBalance);
-      const collateral = balNum > 1_000_000 ? balNum / 1e6 : balNum;
+      // USDC has 6 decimals — CLOB API returns raw minor units (same as allowances)
+      const collateral = balNum / 1e6;
 
       debug.push({ sigType, raw: data, parsed: collateral });
 
