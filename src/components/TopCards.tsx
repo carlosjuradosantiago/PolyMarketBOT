@@ -36,7 +36,17 @@ export default function TopCards({ stats, walletInfo }: TopCardsProps) {
           {walletInfo?.isValid ? (
             <>
               {formatAddress(walletInfo.address)}
-              {walletInfo.openOrders && walletInfo.openOrders.count > 0 ? (
+              {/* Show positions if any */}
+              {walletInfo.openOrders?.positions && walletInfo.openOrders.positions.length > 0 ? (
+                <span className="ml-1 text-cyan-400">
+                  📊 {walletInfo.openOrders.positions.length} {walletInfo.openOrders.positions.length === 1 ? "posición" : "posiciones"} (${walletInfo.openOrders.totalPositionValue.toFixed(2)})
+                  {walletInfo.openOrders.totalPnl !== 0 && (
+                    <span className={walletInfo.openOrders.totalPnl >= 0 ? "text-bot-green" : "text-bot-red"}>
+                      {" "}{walletInfo.openOrders.totalPnl >= 0 ? "+" : ""}${walletInfo.openOrders.totalPnl.toFixed(2)}
+                    </span>
+                  )}
+                </span>
+              ) : walletInfo.openOrders && walletInfo.openOrders.count > 0 ? (
                 <span className="ml-1 text-yellow-400">
                   📋 {walletInfo.openOrders.count} {walletInfo.openOrders.count === 1 ? "orden" : "órdenes"} (${walletInfo.openOrders.totalLocked.toFixed(2)})
                 </span>
