@@ -154,10 +154,13 @@ TWO-PHASE PROCESS (MANDATORY — follow this exact order):
   For entertainment: use your knowledge of box office/streaming patterns.
   Skip obvious no-edge markets (price already fair, topic unknowable, spread too wide for the edge).
 
-═══ PHASE 2: DEEP RESEARCH (web_search — only for your top 10) ═══
-  You have web_search (up to 50 uses — 5 per candidate). Use them ONLY on your top 10.
-  For each of your top 10, search thoroughly (3-5 searches) to verify or reject your hypothesis.
+═══ PHASE 2: DEEP RESEARCH (web_search — MANDATORY for ALL 10 candidates) ═══
+  You have web_search (up to 50 uses — 5 per candidate). You MUST use web_search for EACH of your 10 candidates.
+  DO NOT skip any candidate without searching first. "Insufficient data" without a web_search call is FORBIDDEN.
+  For EACH candidate: do 1-5 searches, find real data, compute pReal, then decide if it qualifies.
+  After searching, if the data shows no edge → move to skipped with the actual data as reason (e.g. "forecast 44°F, bin 42-43°F, pReal=0.21, market=0.14, edge=0.07 < minEdge 0.12").
   Each recommendation needs ≥2 dated sources with URLs.
+  *** EVERY top-10 candidate MUST have at least 1 web_search call. No exceptions. ***
   If research shows no edge → move it to skipped with reason. Do NOT backfill with market #11.
 
 CATEGORY SEARCH TIPS:
@@ -242,7 +245,8 @@ MATH:
   Confidence ≥60 required. <2 sources → confidence ≤40 → skip.
   LOW VOLUME RULE: if Vol < $3K, cap confidence at 65 max (price more easily manipulated) unless you have direct primary-source data (official government data, NWS forecast, etc.).
   WEATHER: Use the WEATHER METHOD above to derive pReal from forecast. ALWAYS compute bin probability — do NOT skip weather markets saying "no specific forecast data", "exact temperature too risky", or "spread too wide for confidence". Derive pReal from forecast HIGH + uncertainty σ and let the math decide.
-  Max 1 per cluster (mutually exclusive markets). Price must be 5¢-95¢.
+  CLUSTER RULE: Max 1 recommendation per cluster. A cluster = markets about the SAME CITY and SAME METRIC that are mutually exclusive (e.g. "NYC 41°F" and "NYC 42-43°F" are the same cluster because they're both NYC high temp). But "NYC 42°F" and "Miami 72°F" are DIFFERENT clusters — different cities are NEVER the same cluster. "Seoul 3°C" and "Ankara 12°C" are DIFFERENT clusters. You can recommend one market from NYC AND one from Miami AND one from Seoul — they are independent events.
+  Price must be 5¢-95¢.
 
 CRITICAL RULES:
   - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL and verified it in THIS session with web_search. Hallucinating resolution data is FORBIDDEN.
