@@ -810,40 +810,48 @@ export interface PaperPriceMap {
   };
 }
 
+export interface PaperOrderRef {
+  conditionId: string;
+  marketId: string;
+}
+
 /**
  * Fetch current prices for all unique markets referenced by paper orders.
+ * Uses /markets/{marketId} (numeric ID) because the ?condition_id= query is broken on Gamma.
  * Returns a map: conditionId → { outcomePrices, question }
  */
 export async function fetchPaperOrderPrices(
-  conditionIds: string[]
+  orders: PaperOrderRef[]
 ): Promise<PaperPriceMap> {
-  const unique = [...new Set(conditionIds)];
-  if (unique.length === 0) return {};
+  if (orders.length === 0) return {};
+
+  // Deduplicate by marketId, keep mapping conditionId→marketId
+  const marketToCondition = new Map<string, string>();
+  for (const o of orders) {
+    if (o.marketId) marketToCondition.set(o.marketId, o.conditionId);
+  }
+  const uniqueMarketIds = [...marketToCondition.keys()];
+  if (uniqueMarketIds.length === 0) return {};
 
   const results: PaperPriceMap = {};
 
   // Fetch in parallel (max 6 concurrent to avoid hammering)
   const BATCH_SIZE = 6;
-  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
-    const batch = unique.slice(i, i + BATCH_SIZE);
-    const promises = batch.map(async (cid) => {
+  for (let i = 0; i < uniqueMarketIds.length; i += BATCH_SIZE) {
+    const batch = uniqueMarketIds.slice(i, i + BATCH_SIZE);
+    const promises = batch.map(async (mid) => {
       try {
-        // Try condition_id query first (works for 0x... hashes)
-        const isCondition = cid.startsWith("0x");
-        const url = isCondition
-          ? `${GAMMA_API}/markets?condition_id=${cid}`
-          : `${GAMMA_API}/markets/${cid}`;
+        // Always use /markets/{id} — the ?condition_id= param is broken on Gamma
+        const url = `${GAMMA_API}/markets/${mid}`;
         const resp = await fetch(url);
         if (!resp.ok) return;
-        const data = await resp.json();
-        const market = isCondition
-          ? (Array.isArray(data) && data.length > 0 ? data[0] : null)
-          : data;
+        const market = await resp.json();
         if (!market) return;
 
         const prices = market.outcomePrices || market.outcome_prices;
         if (!prices) return;
         const parsed = typeof prices === "string" ? JSON.parse(prices) : prices;
+        const cid = marketToCondition.get(mid) || mid;
         results[cid] = {
           outcomePrices: parsed.map((p: string | number) => parseFloat(String(p))),
           question: market.question,
