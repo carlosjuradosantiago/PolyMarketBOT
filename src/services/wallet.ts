@@ -35,6 +35,7 @@ export interface RealOrder {
 export interface RealPosition {
   asset_id: string;
   market: string;
+  marketName: string | null;
   outcome: string;
   shares: number;
   avgPrice: number;
