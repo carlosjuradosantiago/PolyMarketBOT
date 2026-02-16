@@ -144,11 +144,22 @@ UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 WEB SEARCH: You have web_search (up to ${Math.min(shortTermMarkets.length * 5, 100)} uses — 5 per market). STRATEGY:
 1. WEATHER FIRST — weather markets are easiest to verify. Search ALL weather markets. Batch nearby cities in one search (e.g. "NWS forecast Chicago NYC Feb 17").
 2. Then search remaining non-weather candidates with highest likely edge.
-3. NEVER say "no specific forecast data" or "no exact forecast" for a major city — forecasts exist for EVERY major city. You do NOT need an exact-degree forecast. You need the forecast HIGH (or hourly max) and then DERIVE the probability (see WEATHER METHOD below). If official site is blocked/inaccessible, say "official not accessible" and use 2 secondary sources (AccuWeather/Weather.com/Windy/TimeAndDate) with date. If no searches left, say "not searched (budget exhausted)".
-4. Each recommendation needs ≥2 dated sources with URLs (1 official + 1 secondary, or 2 secondary).
+3. Each recommendation needs ≥2 dated sources with URLs (1 official + 1 secondary, or 2 secondary).
 - Politics/geopolitics: polls, official statements, vote counts.
-- Entertainment: box office trackers (BoxOfficeMojo, Numbers), Rotten Tomatoes, streaming charts.
-- Finance: analyst consensus, recent price action, options flow.
+- Entertainment/Netflix: FlixPatrol daily charts + Netflix official Top 10. If no official ranking published yet, use FlixPatrol but cap confidence ≤ 65 and require 2 signals (chart position + trend direction).
+- Finance/Stocks: analyst consensus, recent price action, options flow. EXCLUDE "Up/Down" stock markets UNLESS there is a dated catalyst (earnings, guidance, macro release, Fed decision) within the market's expiry horizon. Without a catalyst, stock direction is ~50/50 noise — skip.
+
+WEATHER SEARCH — ANTI-EXCUSE RULE (MANDATORY):
+  For ANY major city (pop > 100K): official forecasts EXIST. You MUST find and cite them.
+  Step 1: Search the official source for that country (see WEATHER SEARCH PROTOCOL below).
+  Step 2: If official source fails after 2 attempts (blocked/timeout/parseable), then use 2 strong secondary sources (AccuWeather + one of: Meteoblue/Weather.com/Windy/Meteostat) and cap confidence ≤ 65.
+  Step 3: If search budget is exhausted, mark as "NOT SEARCHED (budget exhausted)" — NOT "no data found".
+  FORBIDDEN phrases: "no specific forecast data", "no exact forecast", "no forecast data found", "insufficient forecast data", "could not find forecast".
+  If you write any of those phrases for a city with pop > 100K, your analysis is WRONG — go back and search again.
+
+WEATHER PRE-FILTER (saves searches — apply BEFORE searching):
+  For "exactly X°C" or narrow 1-2°F bin markets: quick-check if any source you already have shows forecast HIGH near that bin. If forecast HIGH is > ±3°C (±5°F) away from the bin → auto-skip with reason "forecast μ far from bin, no edge" without burning a search.
+  For markets with spread ≥ 8% AND Vol < $3K: only search if official source is easy (US/NWS, Canada/EnvCanada, UK/MetOffice). Otherwise skip — not worth the search budget.
 
 WEATHER SEARCH PROTOCOL (mandatory per country):
   US: "NWS point forecast [city] [date]" → weather.gov. If no explicit High, use "Hourly Weather Forecast" and take daily max.
@@ -222,9 +233,10 @@ MATH:
 
 CRITICAL RULES:
   - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL and verified it in THIS session with web_search. Hallucinating resolution data is FORBIDDEN. If you haven't verified with a URL, treat the market as unresolved.
-  - NEVER skip a weather market saying "no specific forecast data" or "exact temperature too risky" — ALWAYS use the WEATHER METHOD with forecast HIGH + σ to compute bin probability.
-  - NEVER say "insufficient forecast data" for a well-known city — every major city has forecasts. Search for them.
+  - NEVER skip a weather market saying "no specific forecast data", "no exact forecast", "no forecast data found", or "exact temperature too risky" — ALWAYS use the WEATHER METHOD with forecast HIGH + σ to compute bin probability. These phrases are BANNED for cities with pop > 100K.
   - For entertainment/box office: only claim resolved if you found the actual data via web_search with a URL. Weekend estimates ≠ final results.
+  - Netflix/streaming: if no official ranking yet, use FlixPatrol but cap confidence ≤ 65, require 2 signals (position + trend).
+  - Stocks "Up/Down": SKIP unless a dated catalyst exists within the expiry window. No catalyst = no edge = skip.
 
 OUTPUT: Raw JSON only, no code fence.
 {
