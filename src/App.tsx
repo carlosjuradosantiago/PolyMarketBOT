@@ -137,6 +137,9 @@ function App() {
       if (info.isValid && info.balance) {
         console.log(`[Wallet] Connected: ${info.address}`);
         console.log(`[Wallet] USDC: $${info.balance.usdc.toFixed(2)}, MATIC: ${info.balance.matic.toFixed(4)}`);
+        if (info.openOrders?.count > 0) {
+          console.log(`[Wallet] Real open orders: ${info.openOrders.count}, locked: $${info.openOrders.totalLocked.toFixed(2)}`);
+        }
       }
     } catch (e) {
       console.error("Error loading wallet:", e);

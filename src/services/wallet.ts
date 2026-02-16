@@ -21,10 +21,25 @@ export interface WalletBalance {
   matic: number;
 }
 
+export interface RealOrder {
+  id: string;
+  market: string;
+  asset_id: string;
+  side: string;
+  price: number;
+  original_size: number;
+  size_matched: number;
+  remaining: number;
+  cost: number;
+  outcome: string;
+  created_at: number;
+}
+
 export interface WalletInfo {
   address: string;
   balance: WalletBalance | null;        // On-chain (Polygon)
   polymarketBalance: number | null;     // USDC deposited in Polymarket
+  openOrders: { count: number; totalLocked: number; orders: RealOrder[] } | null;
   isValid: boolean;
 }
 
@@ -91,6 +106,7 @@ export async function getWalletInfo(privateKey: string): Promise<WalletInfo> {
       address: "",
       balance: null,
       polymarketBalance: null,
+      openOrders: null,
       isValid: false,
     };
   }
@@ -105,6 +121,7 @@ export async function getWalletInfo(privateKey: string): Promise<WalletInfo> {
     address,
     balance,
     polymarketBalance: pmBalance,
+    openOrders: null, // Real orders fetched via /api/wallet serverless function
     isValid: true,
   };
 }

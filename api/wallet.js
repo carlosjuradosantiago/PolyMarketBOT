@@ -211,36 +211,76 @@ async function fetchPolymarketBalance(wallet, apiCreds) {
   return { balance: best, debug };
 }
 
-// ─── Fetch Open Orders for Portfolio Calculation ───
+// ─── Fetch Open Orders ───
 
 async function fetchOpenOrders(wallet, apiCreds) {
   try {
+    // Official CLOB endpoint for open orders (paginated)
     const endpoint = "/data/orders";
     const headers = createL2Headers(apiCreds, wallet.address, "GET", endpoint);
 
-    const response = await fetch(`${CLOB_BASE}${endpoint}?state=OPEN`, {
-      method: "GET",
-      headers,
-    });
+    let allOrders = [];
+    let nextCursor = "MA=="; // base64("0")
+    const END_CURSOR = "LTE="; // base64("-1")
 
-    if (!response.ok) return { count: 0, totalLocked: 0 };
+    while (nextCursor !== END_CURSOR) {
+      const params = `?state=OPEN&next_cursor=${encodeURIComponent(nextCursor)}`;
+      const response = await fetch(`${CLOB_BASE}${endpoint}${params}`, {
+        method: "GET",
+        headers,
+      });
 
-    const orders = await response.json();
-    if (!Array.isArray(orders)) return { count: 0, totalLocked: 0 };
+      if (!response.ok) {
+        console.error(`[Wallet] Open orders: ${response.status}`);
+        break;
+      }
 
-    let totalLocked = 0;
-    for (const o of orders) {
-      // Each order locks some USDC (price * remaining size for BUY orders)
-      const price = parseFloat(o.price || "0");
-      const remaining = parseFloat(o.original_size || o.size || "0") - parseFloat(o.size_matched || "0");
-      if (o.side === "BUY" && remaining > 0) {
-        totalLocked += price * remaining;
+      const body = await response.json();
+      // Paginated response: { data: [...], next_cursor: "..." }
+      if (body && Array.isArray(body.data)) {
+        allOrders = allOrders.concat(body.data);
+        nextCursor = body.next_cursor || END_CURSOR;
+      } else if (Array.isArray(body)) {
+        // Fallback: non-paginated response
+        allOrders = body;
+        break;
+      } else {
+        break;
       }
     }
 
-    return { count: orders.length, totalLocked: Math.round(totalLocked * 100) / 100 };
+    let totalLocked = 0;
+    const ordersList = allOrders.map(o => {
+      const price = parseFloat(o.price || "0");
+      const origSize = parseFloat(o.original_size || o.size || "0");
+      const matched = parseFloat(o.size_matched || "0");
+      const remaining = origSize - matched;
+      const cost = o.side === "BUY" ? price * remaining : 0;
+      totalLocked += cost;
+
+      return {
+        id: o.id,
+        market: o.market,
+        asset_id: o.asset_id,
+        side: o.side,
+        price,
+        original_size: origSize,
+        size_matched: matched,
+        remaining,
+        cost: Math.round(cost * 100) / 100,
+        outcome: o.outcome,
+        created_at: o.created_at,
+      };
+    });
+
+    return {
+      count: ordersList.length,
+      totalLocked: Math.round(totalLocked * 100) / 100,
+      orders: ordersList,
+    };
   } catch (err) {
-    return { count: 0, totalLocked: 0, error: err.message };
+    console.error("[Wallet] Open orders error:", err.message);
+    return { count: 0, totalLocked: 0, orders: [], error: err.message };
   }
 }
 
