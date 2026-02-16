@@ -155,7 +155,7 @@ TWO-PHASE PROCESS (MANDATORY — follow this exact order):
   Skip obvious no-edge markets (price already fair, topic unknowable, spread too wide for the edge).
 
 ═══ PHASE 2: DEEP RESEARCH (web_search — MANDATORY for ALL 10 candidates) ═══
-  You have web_search (up to 50 uses — 5 per candidate). You MUST use web_search for EACH of your 10 candidates.
+  You have web_search (up to 20 uses — 2 per candidate MAX). You MUST use web_search for EACH of your 10 candidates.
   DO NOT skip any candidate without searching first. "Insufficient data" without a web_search call is FORBIDDEN.
   For EACH candidate: do 1-5 searches, find real data, compute pReal, then decide if it qualifies.
   After searching, if the data shows no edge → move to skipped with the actual data as reason (e.g. "forecast 44°F, bin 42-43°F, pReal=0.21, market=0.14, edge=0.07 < minEdge 0.12").
@@ -164,7 +164,7 @@ TWO-PHASE PROCESS (MANDATORY — follow this exact order):
   If research shows no edge → move it to skipped with reason. Do NOT backfill with market #11.
 
 CATEGORY SEARCH TIPS:
-- Weather: 1 official source search + 1 backup max. Batch nearby cities: "NWS forecast Chicago Dallas Atlanta Feb 17".
+- Weather: 1 search per city MAX. Batch nearby cities in ONE search: "NWS forecast Chicago Dallas Atlanta Feb 17". DO NOT search each city individually.
 - Politics/polls: RealClearPolitics, FiveThirtyEight, 270toWin, official statements.
 - Entertainment/Netflix: FlixPatrol, Netflix Top 10, Box Office Mojo, Deadline. If no official ranking yet, use FlixPatrol but cap confidence ≤ 65.
 - Finance/Stocks: analyst consensus, recent price action, options flow. Cap confidence ≤ 55 without dated catalyst.
@@ -392,7 +392,7 @@ export async function analyzeMarketsWithClaude(
       model: modelId,
       max_tokens: 16384,
       temperature: 0.3,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 50 }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 20 }],
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -410,7 +410,7 @@ export async function analyzeMarketsWithClaude(
   const inputTokens = data.usage?.input_tokens || 0;
   const outputTokens = data.usage?.output_tokens || 0;
   const stopReason = data.stop_reason || 'unknown';
-  const costUsd = calculateTokenCost(inputTokens, outputTokens, modelId);
+  let costUsd = calculateTokenCost(inputTokens, outputTokens, modelId);
 
   log(`🛑 stop_reason: ${stopReason} (max_tokens would mean output was truncated)`);
   if (stopReason === 'max_tokens') {
@@ -421,7 +421,10 @@ export async function analyzeMarketsWithClaude(
   // [server_tool_use, web_search_tool_result, ..., text (final JSON)]
   const contentBlocks: any[] = data.content || [];
   const textBlocks = contentBlocks.filter((b: any) => b.type === "text");
-  const content = textBlocks.length > 0 ? textBlocks[textBlocks.length - 1].text : "";
+  // Combine ALL text blocks — Claude may split its response across multiple text blocks
+  // The JSON is usually in the last one, but intermediate blocks may contain partial analysis
+  const allText = textBlocks.map((b: any) => b.text || "").join("\n");
+  const content = allText;
 
   // Count and log web searches performed
   const webSearchUses = contentBlocks.filter((b: any) => b.type === "server_tool_use" && b.name === "web_search");
@@ -525,6 +528,79 @@ export async function analyzeMarketsWithClaude(
   }
 
   log(`📊 Resultado: ${analyses.length} recomendaciones con edge`);
+
+  // ── RETRY: If Claude wasted all tokens on web_search and returned no JSON, retry WITHOUT search ──
+  if (analyses.length === 0 && skippedMarkets.length === 0 && !content.includes('"recommendations"')) {
+    log(`⚠️ Claude devolvió 0 recs y 0 skipped sin JSON válido. Reintentando SIN web_search...`);
+    log(`   (Causa probable: ${inputTokens} input tokens de web_search inflaron el contexto)`);
+    try {
+      const retryStart = Date.now();
+      const retryResponse = await fetch(CLAUDE_PROXY, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "apikey": SUPABASE_KEY,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          max_tokens: 16384,
+          temperature: 0.3,
+          // NO web_search — force Claude to use general knowledge only
+          messages: [{ role: "user", content: prompt + "\n\nIMPORTANT: web_search is NOT available. Use ONLY your general knowledge to screen and recommend. Output the JSON immediately." }],
+        }),
+      });
+      if (retryResponse.ok) {
+        const retryData = await retryResponse.json();
+        const retryBlocks: any[] = retryData.content || [];
+        const retryText = retryBlocks.filter((b: any) => b.type === "text").map((b: any) => b.text || "").join("\n");
+        const retryInputTokens = retryData.usage?.input_tokens || 0;
+        const retryOutputTokens = retryData.usage?.output_tokens || 0;
+        const retryCost = calculateTokenCost(retryInputTokens, retryOutputTokens, modelId);
+        const retryElapsed = Date.now() - retryStart;
+        log(`✅ Retry: ${retryElapsed}ms, ${retryInputTokens}↓ / ${retryOutputTokens}↑, costo extra: $${retryCost.toFixed(4)}`);
+        try {
+          const retryJson = extractJSON(retryText);
+          const retryParsed = JSON.parse(retryJson);
+          if (Array.isArray(retryParsed.recommendations) && retryParsed.recommendations.length > 0) {
+            log(`🔄 Retry exitoso: ${retryParsed.recommendations.length} recomendaciones`);
+            // Re-parse recommendations from retry
+            analyses = retryParsed.recommendations
+              .filter((item: any) => item.recommendedSide && item.recommendedSide.toUpperCase() !== "SKIP")
+              .map((item: any) => {
+                const side = (item.recommendedSide || "SKIP").toUpperCase();
+                let pReal = parseFloat(item.pReal) || 0;
+                const pMarket = parseFloat(item.pMarket) || 0;
+                let pLow = parseFloat(item.pLow) || 0;
+                let pHigh = parseFloat(item.pHigh) || 0;
+                if (side === "NO" && pReal > 0.50) { pReal = 1 - pReal; const ol = pLow; pLow = 1 - pHigh; pHigh = 1 - ol; }
+                return {
+                  marketId: item.marketId || "", question: item.question || "",
+                  pMarket, pReal, pLow, pHigh, edge: Math.abs(pReal - pMarket),
+                  confidence: parseInt(item.confidence) || 0, recommendedSide: side,
+                  reasoning: item.reasoning || "", sources: item.sources || [],
+                  evNet: parseFloat(item.evNet) || undefined, maxEntryPrice: parseFloat(item.maxEntryPrice) || undefined,
+                  sizeUsd: parseFloat(item.sizeUsd) || undefined, orderType: item.orderType || undefined,
+                  clusterId: item.clusterId || null, risks: item.risks || "",
+                  resolutionCriteria: item.resolutionCriteria || "",
+                  category: item.category || undefined, friction: parseFloat(item.friction) || undefined,
+                  expiresInMin: parseInt(item.expiresInMin) || undefined,
+                  liqUsd: parseFloat(item.liqUsd) || undefined, volUsd: parseFloat(item.volUsd) || undefined,
+                  dataFreshnessScore: parseInt(item.dataFreshnessScore) || undefined,
+                  executionNotes: item.executionNotes || undefined,
+                };
+              });
+            summary = retryParsed.summary || "(retry sin web_search)";
+            if (Array.isArray(retryParsed.skipped)) {
+              skippedMarkets = retryParsed.skipped.map((s: any) => ({ marketId: s.marketId || "", question: s.question || "", reason: s.reason || "" }));
+            }
+          }
+        } catch { log(`⚠️ Retry también falló al parsear JSON`); }
+        // Add retry cost to totals
+        costUsd += retryCost;
+      }
+    } catch (retryErr) { log(`❌ Retry failed:`, retryErr); }
+  }
 
   // ── Build complete usage object with parsed data ──
   const usage: AIUsage = {
