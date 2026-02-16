@@ -36,7 +36,7 @@ import { clearCachedCreds } from "./services/clobAuth";
 import { runSmartCycle, setMaxExpiry, clearAnalyzedCache } from "./services/smartTrader";
 import { loadCostTracker, resetCostTracker } from "./services/claudeAI";
 import { getBankrollStatus, canTrade } from "./services/kellyStrategy";
-import { dbGetBotState, dbSetBotState, dbAddActivity, dbGetActivities, dbAddActivitiesBatch, dbLoadPortfolio, dbSetInitialBalance } from "./services/db";
+import { dbGetBotState, dbSetBotState, dbAddActivity, dbGetActivities, dbAddActivitiesBatch, dbLoadPortfolio, dbSetInitialBalance, dbGetLastCycleTimestamp } from "./services/db";
 import { loadPortfolioFromDB } from "./services/paperTrading";
 
 // One-time: clear stale CLOB credentials so fresh derive runs
@@ -420,6 +420,7 @@ function App() {
         tradingCycleRef.current?.().then(() => {
           const next = secondsUntilNext6am();
           dynamicIntervalRef.current = next;
+          setDynamicInterval(next);
           if (!cancelled) scheduleNext(next);
         }).catch(() => {
           if (!cancelled) scheduleNext(600); // Retry in 10 min on error
@@ -427,13 +428,43 @@ function App() {
       }, delaySecs * 1000);
     };
 
-    // Run first cycle immediately, then schedule to next 6am
-    tradingCycleRef.current?.().then(() => {
-      const next = secondsUntilNext6am();
-      dynamicIntervalRef.current = next;
-      if (!cancelled) scheduleNext(next);
+    // Check DB for last cycle timestamp — prevent wasteful immediate re-runs on page reload
+    const MIN_CYCLE_GAP_MS = 20 * 3600 * 1000; // 20 hours minimum between cycles
+    dbGetLastCycleTimestamp().then((lastCycleTime) => {
+      if (cancelled) return;
+      const msSinceLastCycle = lastCycleTime ? Date.now() - lastCycleTime.getTime() : Infinity;
+
+      if (msSinceLastCycle < MIN_CYCLE_GAP_MS) {
+        // Recent cycle exists — skip immediate run, schedule to next 6am
+        const next = secondsUntilNext6am();
+        const hoursAgo = (msSinceLastCycle / 3600_000).toFixed(1);
+        console.log(`[Cycle] Last AI cycle was ${hoursAgo}h ago (< 20h) — skipping immediate run, next at 6am in ${(next/3600).toFixed(1)}h`);
+        dynamicIntervalRef.current = next;
+        setDynamicInterval(next);
+        setCountdown(next);
+        scheduleNext(next);
+      } else {
+        // No recent cycle (or first ever) — run immediately
+        console.log(`[Cycle] No recent cycle (>20h) — running immediately`);
+        tradingCycleRef.current?.().then(() => {
+          const next = secondsUntilNext6am();
+          dynamicIntervalRef.current = next;
+          setDynamicInterval(next);
+          if (!cancelled) scheduleNext(next);
+        }).catch(() => {
+          if (!cancelled) scheduleNext(600);
+        });
+      }
     }).catch(() => {
-      if (!cancelled) scheduleNext(600);
+      // DB check failed — run immediately as fallback
+      tradingCycleRef.current?.().then(() => {
+        const next = secondsUntilNext6am();
+        dynamicIntervalRef.current = next;
+        setDynamicInterval(next);
+        if (!cancelled) scheduleNext(next);
+      }).catch(() => {
+        if (!cancelled) scheduleNext(600);
+      });
     });
 
     return () => {

@@ -369,6 +369,25 @@ export async function dbGetAICostDetail(id: number): Promise<{ prompt: string | 
   return { prompt: data.prompt || null, rawResponse: data.raw_response || null, skipped };
 }
 
+// ─── Last Cycle Timestamp (anti-rapid-fire guard) ─────
+
+/** Get the timestamp of the most recent cycle_log entry that actually called AI (cost > 0) */
+export async function dbGetLastCycleTimestamp(): Promise<Date | null> {
+  try {
+    const { data, error } = await supabase
+      .from("cycle_logs")
+      .select("timestamp")
+      .gt("cost_usd", 0)  // Only count cycles that actually called AI
+      .order("id", { ascending: false })
+      .limit(1)
+      .single();
+    if (error || !data) return null;
+    return new Date(data.timestamp);
+  } catch {
+    return null;
+  }
+}
+
 // ─── Cycle Logs ───────────────────────────────────────
 
 export async function dbGetCycleLogs(limit = 20): Promise<CycleDebugLog[]> {
