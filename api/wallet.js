@@ -170,8 +170,9 @@ function extractCreds(data) {
 // ─── Fetch Polymarket CLOB Balance ──────────────
 
 async function fetchPolymarketBalance(wallet, apiCreds) {
-  // Try all signature types, return highest balance
+  // Try all signature types, collect debug data
   let best = null;
+  const debug = [];
 
   for (const sigType of [0, 1, 2]) {
     try {
@@ -185,22 +186,61 @@ async function fetchPolymarketBalance(wallet, apiCreds) {
         headers,
       });
 
-      if (!response.ok) continue;
+      if (!response.ok) {
+        debug.push({ sigType, status: response.status, error: "not ok" });
+        continue;
+      }
 
       const data = await response.json();
       const rawBalance = String(data.balance ?? data.collateral ?? "0");
       const balNum = parseFloat(rawBalance);
       const collateral = balNum > 1_000_000 ? balNum / 1e6 : balNum;
 
+      debug.push({ sigType, raw: data, parsed: collateral });
+
       if (!best || collateral > best) {
         best = collateral;
       }
-    } catch {
+    } catch (err) {
+      debug.push({ sigType, error: err.message });
       continue;
     }
   }
 
-  return best;
+  return { balance: best, debug };
+}
+
+// ─── Fetch Open Orders for Portfolio Calculation ───
+
+async function fetchOpenOrders(wallet, apiCreds) {
+  try {
+    const endpoint = "/data/orders";
+    const headers = createL2Headers(apiCreds, wallet.address, "GET", endpoint);
+
+    const response = await fetch(`${CLOB_BASE}${endpoint}?state=OPEN`, {
+      method: "GET",
+      headers,
+    });
+
+    if (!response.ok) return { count: 0, totalLocked: 0 };
+
+    const orders = await response.json();
+    if (!Array.isArray(orders)) return { count: 0, totalLocked: 0 };
+
+    let totalLocked = 0;
+    for (const o of orders) {
+      // Each order locks some USDC (price * remaining size for BUY orders)
+      const price = parseFloat(o.price || "0");
+      const remaining = parseFloat(o.original_size || o.size || "0") - parseFloat(o.size_matched || "0");
+      if (o.side === "BUY" && remaining > 0) {
+        totalLocked += price * remaining;
+      }
+    }
+
+    return { count: orders.length, totalLocked: Math.round(totalLocked * 100) / 100 };
+  } catch (err) {
+    return { count: 0, totalLocked: 0, error: err.message };
+  }
 }
 
 // ─── Main Handler ───────────────────────────────
@@ -222,16 +262,24 @@ export default async function handler(req, res) {
     const address = wallet.address;
 
     // Fetch on-chain balance and Polymarket CLOB balance in parallel
-    const [balance, pmBalance] = await Promise.all([
+    const apiCreds = await getApiCredentials(wallet);
+    const [balance, pmResult, ordersInfo] = await Promise.all([
       fetchBalance(address),
       (async () => {
         try {
-          const apiCreds = await getApiCredentials(wallet);
-          if (!apiCreds) return null;
+          if (!apiCreds) return { balance: null, debug: [{ error: "no API credentials" }] };
           return await fetchPolymarketBalance(wallet, apiCreds);
         } catch (err) {
           console.error("[Wallet API] Polymarket balance error:", err.message);
-          return null;
+          return { balance: null, debug: [{ error: err.message }] };
+        }
+      })(),
+      (async () => {
+        try {
+          if (!apiCreds) return { count: 0, totalLocked: 0 };
+          return await fetchOpenOrders(wallet, apiCreds);
+        } catch (err) {
+          return { count: 0, totalLocked: 0, error: err.message };
         }
       })(),
     ]);
@@ -239,7 +287,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       address,
       balance,
-      polymarketBalance: pmBalance,
+      polymarketBalance: pmResult.balance,
+      openOrders: ordersInfo,
+      _debug: pmResult.debug,
       isValid: true,
     });
   } catch (err) {
