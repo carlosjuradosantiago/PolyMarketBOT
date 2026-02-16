@@ -103,6 +103,34 @@ export function computeClusterKey(question: string): string {
 }
 
 /**
+ * Extract a BROAD cluster key for conflict detection across cycles.
+ * Groups ALL markets about the same subject regardless of threshold format.
+ * Example: "NYC highest temp 41°F or below" and "NYC between 42-43°F" 
+ * both map to "new york city|highest temperature" → same broad cluster.
+ * 
+ * Also handles: Trump approval 40.0, 40.5, etc.; box office ranges; flu rates.
+ */
+export function computeBroadClusterKey(question: string): string {
+  let q = question.toLowerCase().trim();
+  
+  // Remove all numbers, number ranges, thresholds, units
+  q = q.replace(/[-+]?\d[\d,]*\.?\d*/g, "");
+  // Remove temperature units and common suffixes
+  q = q.replace(/°[fc]/g, "");
+  // Remove threshold words
+  q = q.replace(/\b(between|or below|or above|less than|more than|greater than|at least|at most|exactly|be\b)/g, "");
+  // Remove common filler
+  q = q.replace(/\b(will|the|be|on|in|this|a|an|of|for|to|and|or)\b/g, "");
+  // Remove question mark
+  q = q.replace(/\?/g, "");
+  // Collapse whitespace
+  q = q.replace(/\s+/g, " ").trim();
+  
+  if (q.length < 10) return "";
+  return q;
+}
+
+/**
  * Count unique clusters from a list of market questions.
  * Returns the number of markets Claude would actually see after dedup.
  */

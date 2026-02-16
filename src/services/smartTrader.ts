@@ -21,7 +21,7 @@ import { analyzeMarketsWithClaude, loadCostTracker, formatCost, ClaudeResearchRe
 import {
   JUNK_PATTERNS, JUNK_REGEXES, WEATHER_RE,
   computeMinLiquidity, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
-  PRICE_FLOOR, PRICE_CEILING, computeClusterKey,
+  PRICE_FLOOR, PRICE_CEILING, computeClusterKey, computeBroadClusterKey,
   estimateSpread, MAX_SPREAD,
 } from "./marketConstants";
 // loadCostTracker is now async (DB-only)
@@ -231,14 +231,19 @@ export function clearAnalyzedCache(): void {
 function deduplicateCorrelatedMarkets(analyses: MarketAnalysis[]): MarketAnalysis[] {
   if (analyses.length <= 1) return analyses;
 
-  // Step 1: Build cluster map
+  // Step 1: Build cluster map using BROAD cluster key
+  // This catches "NYC ≤41°F" + "NYC 42-43°F" as same cluster (both about NYC high temp)
   const clusterMap = new Map<string, MarketAnalysis[]>();
 
   for (const a of analyses) {
     // Try Claude's clusterId first
     let key = a.clusterId || "";
 
-    // If no clusterId, compute a text-based cluster key
+    // If no clusterId, compute a BROAD text-based cluster key
+    if (!key) {
+      key = computeBroadClusterKey(a.question);
+    }
+    // Fallback to narrow key if broad is empty
     if (!key) {
       key = computeClusterKey(a.question);
     }
@@ -675,6 +680,34 @@ async function _runSmartCycleInner(
   // Replace pool contents with deduped version
   pool.length = 0;
   pool.push(...dedupedPool);
+
+  // ─── Step 1.6: Filter out markets conflicting with OPEN ORDERS (broad cluster match) ──
+  // "NYC ≤41°F" and "NYC between 42-43°F" are mutually exclusive — betting both is
+  // guaranteed to lose one. Uses broad cluster key (strips all numbers + threshold words).
+  const openOrderBroadKeys = new Set<string>();
+  for (const o of portfolio.openOrders) {
+    if (o.status !== "filled" && o.status !== "pending") continue;
+    const bk = computeBroadClusterKey(o.marketQuestion);
+    if (bk) openOrderBroadKeys.add(bk);
+  }
+  if (openOrderBroadKeys.size > 0) {
+    const beforeLen = pool.length;
+    const conflicting: string[] = [];
+    const filtered = pool.filter(m => {
+      const bk = computeBroadClusterKey(m.question);
+      if (bk && openOrderBroadKeys.has(bk)) {
+        conflicting.push(`"${m.question.slice(0, 60)}" (cluster: ${bk.slice(0, 40)})`);
+        return false;
+      }
+      return true;
+    });
+    if (conflicting.length > 0) {
+      log(`  🚫 Broad cluster conflict filter: removed ${conflicting.length} markets already covered by open orders:`);
+      conflicting.forEach(c => log(`     - ${c}`));
+    }
+    pool.length = 0;
+    pool.push(...filtered);
+  }
 
   const expiryLabel = _maxExpiryMs >= 86400000 ? `≤${(_maxExpiryMs / 86400000).toFixed(_maxExpiryMs % 86400000 === 0 ? 0 : 1)}d` : `≤${_maxExpiryMs / 3600000}h`;
   log(`⏱️ Pool ${expiryLabel}: ${pool.length} mercados (de ${allMarkets.length}, ${clustersCollapsed} cluster-dupes eliminados) — Filtro: ${breakdown.filterLabel}`);
