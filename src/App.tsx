@@ -170,12 +170,18 @@ function App() {
     const refs: PaperOrderRef[] = orders
       .filter(o => o.marketId)
       .map(o => ({ conditionId: o.conditionId, marketId: o.marketId }));
-    if (refs.length === 0) return;
+    console.log("[App] loadPaperPrices: openOrders:", orders.length, "refs with marketId:", refs.length);
+    console.log("[App] Sample orders:", orders.slice(0, 3).map(o => ({ id: o.id?.slice(0, 8), mId: o.marketId, cId: o.conditionId?.slice(0, 16) })));
+    if (refs.length === 0) {
+      console.log("[App] No refs with marketId — skipping");
+      return;
+    }
     try {
       const prices = await fetchPaperOrderPrices(refs);
+      console.log("[App] Got paperPrices:", Object.keys(prices).length, "keys:", Object.keys(prices).slice(0, 5).map(k => k.slice(0, 16)));
       setPaperPrices(prices);
-    } catch {
-      // Silently ignore — will retry on next interval
+    } catch (err) {
+      console.error("[App] fetchPaperOrderPrices error:", err);
     }
   }, []);
 
@@ -616,7 +622,7 @@ function App() {
       </div>
 
       {/* Top Cards */}
-      <TopCards stats={stats} walletInfo={walletInfo} portfolio={portfolio} paperPrices={paperPrices} />
+      <TopCards stats={stats} walletInfo={walletInfo} />
 
       {/* Main Content */}
       <div className="flex-1 flex gap-3 px-4 pb-3 min-h-0 overflow-hidden">
