@@ -287,8 +287,10 @@ const MIN_POOL_TARGET = 15;
 
 const FILTER_LEVEL_LABELS = ["Estricto", "+Crypto", "+Crypto+Stocks", "Todo (sin junk)"];
 
-/** Max batches per cycle — if 0 bets placed, try next batch immediately */
-const MAX_BATCHES_PER_CYCLE = 3;
+/** Max markets to analyze per cycle (daily limit) */
+const MAX_ANALYZED_PER_CYCLE = 20;
+/** Max Claude batches = MAX_ANALYZED_PER_CYCLE / BATCH_SIZE */
+const MAX_BATCHES_PER_CYCLE = 5;
 
 // ─── Category classifier for pool diversification ─────
 // WEATHER_RE imported from marketConstants.ts
@@ -764,19 +766,18 @@ async function _runSmartCycleInner(
   // interleave categories so Claude sees weather + politics + finance + etc.
   const BATCH_SIZE = 4;  // Send 4 markets at a time for deep analysis
   const fullPool = [...pool]; // keep reference to full pool for market lookup
-  const diversified = diversifyPool(pool, pool.length); // reorder, don't truncate yet
+  const diversified = diversifyPool(pool, Math.min(pool.length, MAX_ANALYZED_PER_CYCLE)); // reorder + cap at daily limit
 
-  // Split into sequential batches of 4 — ALL markets get analyzed
+  // Split into sequential batches of 4 — max MAX_BATCHES_PER_CYCLE batches
   const batches: PolymarketMarket[][] = [];
-  for (let i = 0; i < diversified.length; i += BATCH_SIZE) {
+  for (let i = 0; i < diversified.length && batches.length < MAX_BATCHES_PER_CYCLE; i += BATCH_SIZE) {
     batches.push(diversified.slice(i, i + BATCH_SIZE));
   }
-  // No batch limit — analyze ALL markets sequentially
 
-  log(`📦 Pool dividido en ${batches.length} batch(es) de ≤${BATCH_SIZE} mercados (análisis profundo secuencial)`);
+  log(`📦 Pool: ${fullPool.length} mercados → ${diversified.length} seleccionados → ${batches.length} batch(es) de ≤${BATCH_SIZE} (máx ${MAX_ANALYZED_PER_CYCLE}/día)`);
 
-  // shouldAnalyze checks if total estimated cost for ALL batches is affordable
-  const totalMarketsToAnalyze = diversified.length;
+  // shouldAnalyze checks if estimated cost for selected batches is affordable
+  const totalMarketsToAnalyze = diversified.length; // capped at MAX_ANALYZED_PER_CYCLE
   if (!shouldAnalyze(portfolio.balance, totalMarketsToAnalyze)) {
     const msg = "💸 Costo de IA excede límite seguro para bankroll actual.";
     activities.push(activity(msg, "Warning"));
