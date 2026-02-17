@@ -137,35 +137,24 @@ function buildOSINTPrompt(
     ? `HISTORY: {"trades": ${history.totalTrades}, "wins": ${history.wins}, "losses": ${history.losses}, "winRate": ${(history.winRate / 100).toFixed(2)}, "roi": ${history.totalPnl !== 0 ? (history.totalPnl / 100).toFixed(3) : "0.000"}, "pnl": ${history.totalPnl.toFixed(2)}}\n  → ${history.winRate >= 55 ? "Calibration OK — maintain discipline." : history.winRate >= 45 ? "Marginal — tighten confidence thresholds, require stronger edge." : "Poor — be MORE conservative, raise minimum confidence to 70, minimum edge to 0.12."}`
     : "HISTORY: No resolved trades yet — be conservative, require strong evidence.";
 
-  return `Polymarket mispricing scanner. Find where public data (odds, forecasts, polls) disagrees with market prices.
+  return `Polymarket mispricing scanner. Deep-analyze ${shortTermMarkets.length} markets using web_search. Find where public data disagrees with market prices.
 
 UTC: ${now.toISOString()} | BANKROLL: $${bankroll.toFixed(2)} | ${historyLine}
 
-TWO-PHASE PROCESS (MANDATORY — follow this exact order):
+═══ DEEP RESEARCH — ANALYZE ALL ${shortTermMarkets.length} MARKETS ═══
+You have ONLY ${shortTermMarkets.length} markets. Research EVERY SINGLE ONE thoroughly with web_search.
+Use as many web_search calls as you need per market — there is NO limit. Do a THOROUGH job.
+For each market:
+  1. Search for the most relevant, recent data (forecasts, polls, official results, news)
+  2. If first search isn't conclusive, search AGAIN with different terms
+  3. Compute pReal based on the data you found
+  4. Decide: recommend (if edge exists) or skip (explain why with data)
 
-═══ PHASE 1: SCREENING (no web_search yet — use only the market data shown above) ═══
-  Scan ALL ${shortTermMarkets.length} markets. For each one, estimate a preliminary edge based ONLY on:
-  - Your general knowledge (weather norms, political context, typical stock behavior)
-  - The market price vs. your prior estimate
-  - Spread, volume, liquidity quality
-  Select your TOP 10 candidates — the markets most likely to have real edge.
-  For weather: use your knowledge of typical temperatures for that city/season to do a quick mental filter.
-  For politics/polls: use your knowledge of recent trends.
-  For entertainment: use your knowledge of box office/streaming patterns.
-  Skip obvious no-edge markets (price already fair, topic unknowable, spread too wide for the edge).
-
-═══ PHASE 2: DEEP RESEARCH (web_search — MANDATORY for ALL 10 candidates) ═══
-  You have web_search (ONLY 10 uses total — 1 per candidate). You MUST use web_search for EACH of your 10 candidates.
-  DO NOT skip any candidate without searching first. "Insufficient data" without a web_search call is FORBIDDEN.
-  For EACH candidate: do exactly 1 search, find real data, compute pReal, then decide if it qualifies.
-  BUDGET: You have exactly 10 searches. Use 1 per candidate. Batch related cities in 1 search query.
-  After searching, if the data shows no edge → move to skipped with the actual data as reason.
-  Each recommendation needs ≥1 dated source with URL.
-  *** EVERY top-10 candidate MUST have exactly 1 web_search call. No exceptions. ***
-  If research shows no edge → move it to skipped with reason. Do NOT backfill with market #11.
+GOAL: Quality over speed. You have few markets — analyze each one deeply. Multiple searches per market = GOOD.
 
 CATEGORY SEARCH TIPS:
-- Weather: Batch ALL weather cities in 1-2 searches: "NWS forecast Chicago Dallas Atlanta Feb 17". DO NOT search each city individually — use 1 query for all US cities, 1 for non-US.
+- Weather: Search official forecast for the SPECIFIC city + date. Use NWS (US), Met Office (UK), EnvCanada, KMA (Korea), etc.
+  If first search fails, try AccuWeather, Weather.com, or TimeAndDate as fallback.
 - Politics/polls: RealClearPolitics, FiveThirtyEight, 270toWin, official statements.
 - Entertainment/Netflix: FlixPatrol, Netflix Top 10, Box Office Mojo, Deadline. If no official ranking yet, use FlixPatrol but cap confidence ≤ 65.
 - Finance/Stocks: analyst consensus, recent price action, options flow. Cap confidence ≤ 55 without dated catalyst.
@@ -231,7 +220,7 @@ BLACKLIST (already own): ${blacklist}
 MARKETS (${shortTermMarkets.length}):
 ${marketLines}
 
-PROCESS: Follow the TWO-PHASE PROCESS above. Phase 1: screen all ${shortTermMarkets.length} markets without searching. Phase 2: search your top 10 (EXACTLY 10 searches, 1 per candidate).
+PROCESS: Research ALL ${shortTermMarkets.length} markets using web_search. No limit on searches — be thorough. For each market, search → analyze → decide (recommend or skip with data-backed reason).
 
 MATH:
   pReal = ALWAYS your probability that YES happens (regardless of which side you recommend).
@@ -242,7 +231,7 @@ MATH:
   friction = USE THE Spread SHOWN for each market. Near-expiry(<30min): add +2%.
   Weather with horizon>12h: use LIMIT orders.
   evNet = edge - friction (must be >0)
-  kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.25*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
+  kelly = (pReal*b - q)/b where b=(1/price-1), q=1-pReal. Size = kelly*0.50*bankroll. Cap $${(bankroll * 0.1).toFixed(2)}. Min $2.
   Confidence ≥60 required. <2 sources → confidence ≤40 → skip.
   LOW VOLUME RULE: if Vol < $3K, cap confidence at 65 max (price more easily manipulated) unless you have direct primary-source data (official government data, NWS forecast, etc.).
   WEATHER: Use the WEATHER METHOD above to derive pReal from forecast. ALWAYS compute bin probability — do NOT skip weather markets saying "no specific forecast data", "exact temperature too risky", or "spread too wide for confidence". Derive pReal from forecast HIGH + uncertainty σ and let the math decide.
@@ -260,7 +249,7 @@ CRITICAL RULES:
   - For entertainment/box office: only claim resolved if you found the actual data via web_search with a URL AND the number EXACTLY matches the market's criteria (3-day vs 4-day, domestic vs worldwide, etc.).
   - Netflix/streaming: if no official ranking yet, use FlixPatrol but cap confidence ≤ 65, require 2 signals (position + trend).
   - Stocks "Up/Down": cap confidence ≤ 55 without dated catalyst.
-  - PHASE 1 must produce exactly 10 candidates. PHASE 2 must search ALL 10. Do NOT skip Phase 2 or search fewer than 10.
+  - You MUST research ALL ${shortTermMarkets.length} markets with web_search. Do NOT skip any market without searching first.
   - GOAL: Find profitable bets based on REAL DATA from web searches, not guesses. The user needs actionable recommendations grounded in evidence.
 
 OUTPUT: Raw JSON only, no code fence.
@@ -404,7 +393,7 @@ export async function analyzeMarketsWithClaude(
       model: modelId,
       max_tokens: 16384,
       temperature: 0.3,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }],
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -675,9 +664,13 @@ Output ONLY valid JSON (no code fence, no extra text):
 
 export function estimateAnalysisCost(marketCount: number, model?: string): number {
   const modelId = model || "claude-sonnet-4-20250514";
-  // ~50 tokens per market line + ~400 token prompt scaffold + ~20 per open order
-  const estInput = 400 + (marketCount * 50);
-  const estOutput = 300 + Math.min(marketCount, 5) * 250; // ~250 tokens per recommendation
+  // Deep analysis with unlimited web_search: ~2000 tokens per market (search results inflate input)
+  // Batches of 4 markets each, but estimate total cost for all markets
+  const batchCount = Math.ceil(marketCount / 4);
+  const estInputPerBatch = 2000 + (4 * 2000); // prompt + search results per batch
+  const estOutputPerBatch = 500 + (4 * 400);   // detailed analysis per market
+  const estInput = batchCount * estInputPerBatch;
+  const estOutput = batchCount * estOutputPerBatch;
   return calculateTokenCost(estInput, estOutput, modelId);
 }
 
