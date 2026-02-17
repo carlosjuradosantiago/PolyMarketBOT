@@ -762,22 +762,22 @@ async function _runSmartCycleInner(
   // ─── Step 2: Build category-diverse batches ─────────
   // Instead of sending top-30-by-volume (which may all be one category),
   // interleave categories so Claude sees weather + politics + finance + etc.
-  const MAX_POOL_FOR_ANALYSIS = 50;  // Daily run: send more markets per batch
+  const BATCH_SIZE = 4;  // Send 4 markets at a time for deep analysis
   const fullPool = [...pool]; // keep reference to full pool for market lookup
   const diversified = diversifyPool(pool, pool.length); // reorder, don't truncate yet
 
-  // Split into batches of MAX_POOL_FOR_ANALYSIS
+  // Split into sequential batches of 4 — ALL markets get analyzed
   const batches: PolymarketMarket[][] = [];
-  for (let i = 0; i < diversified.length; i += MAX_POOL_FOR_ANALYSIS) {
-    batches.push(diversified.slice(i, i + MAX_POOL_FOR_ANALYSIS));
+  for (let i = 0; i < diversified.length; i += BATCH_SIZE) {
+    batches.push(diversified.slice(i, i + BATCH_SIZE));
   }
-  const MAX_BATCHES_PER_CYCLE_LOCAL = 3; // Daily run: up to 3 batches of 50 = 150 markets max
-  if (batches.length > MAX_BATCHES_PER_CYCLE_LOCAL) batches.length = MAX_BATCHES_PER_CYCLE_LOCAL;
+  // No batch limit — analyze ALL markets sequentially
 
-  log(`📦 Pool dividido en ${batches.length} batch(es) de ≤${MAX_POOL_FOR_ANALYSIS} mercados (diversificado por categoría)`);
+  log(`📦 Pool dividido en ${batches.length} batch(es) de ≤${BATCH_SIZE} mercados (análisis profundo secuencial)`);
 
-  // shouldAnalyze uses available cash (true Kelly bankroll)
-  if (!shouldAnalyze(portfolio.balance, batches[0]?.length || 0)) {
+  // shouldAnalyze checks if total estimated cost for ALL batches is affordable
+  const totalMarketsToAnalyze = diversified.length;
+  if (!shouldAnalyze(portfolio.balance, totalMarketsToAnalyze)) {
     const msg = "💸 Costo de IA excede límite seguro para bankroll actual.";
     activities.push(activity(msg, "Warning"));
     debugLog.error = msg;
@@ -1037,16 +1037,13 @@ async function _runSmartCycleInner(
       log(`     ✅ BET: ${kelly.outcomeName} — $${kelly.betAmount.toFixed(2)} @ ${(kelly.price * 100).toFixed(1)}¢ — ${minutesLeft}min left`);
     }
 
-    // If we placed bets this batch → stop (don't burn more API calls)
+    // Always continue to next batch — analyze ALL markets
     if (betsThisBatch > 0) {
-      log(`✅ ${batchLabel} colocó ${betsThisBatch} apuesta(s) — deteniendo batches.`);
-      break;
+      log(`✅ ${batchLabel} colocó ${betsThisBatch} apuesta(s) — continuando con siguiente batch...`);
     }
-
-    // If no bets and more batches remain → log and continue immediately
     if (batchIdx < batches.length - 1) {
-      log(`📭 ${batchLabel}: 0 apuestas — probando siguiente batch inmediatamente...`);
-      activities.push(activity(`📭 ${batchLabel}: 0 apuestas — probando siguiente batch...`, "Info"));
+      log(`📡 ${batchLabel}: ${betsThisBatch} apuesta(s) — siguiente batch...`);
+      activities.push(activity(`📡 Batch ${batchIdx + 1}/${batches.length}: ${betsThisBatch} apuesta(s) — continuando...`, "Info"));
     }
   } // end batch loop
 
@@ -1068,7 +1065,7 @@ async function _runSmartCycleInner(
 
   if (totalBetsThisCycle === 0) {
     let reason = "";
-    if (totalRecommendations === 0) reason = `Claude no encontró mispricing en ${batches.length} batch(es) (${Math.min(fullPool.length, batches.length * MAX_POOL_FOR_ANALYSIS)} mercados ${expiryLabel}).`;
+    if (totalRecommendations === 0) reason = `Claude no encontró mispricing en ${batches.length} batch(es) (${fullPool.length} mercados ${expiryLabel}).`;
     else reason = "Kelly rechazó las recomendaciones (edge o monto insuficiente).";
 
     activities.push(activity(

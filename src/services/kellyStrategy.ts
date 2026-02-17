@@ -19,7 +19,7 @@ import { estimateAnalysisCost } from "./claudeAI";
 
 // ─── Config ───────────────────────────────────────────
 
-const KELLY_FRACTION = 0.25;          // Quarter-Kelly for safety
+const KELLY_FRACTION = 0.50;          // Half-Kelly for balanced growth
 const MAX_BET_FRACTION = 0.10;        // Never more than 10% of bankroll
 const MIN_BET_USD = 1.00;             // Polymarket platform minimum order size ($1 USDC)
 const MIN_EDGE_AFTER_COSTS = 0.06;    // 6% minimum net edge (after AI costs, before 8% gross)
@@ -277,9 +277,9 @@ export function shouldAnalyze(
   
   const estimatedCost = estimateAnalysisCost(marketCount, model);
   
-  // Don't spend more than 2% of bankroll on a single analysis (scanner mode needs larger batches)
-  if (estimatedCost > bankroll * 0.02) {
-    log(`Analysis cost $${estimatedCost.toFixed(4)} > 2% of bankroll $${bankroll.toFixed(2)} — skipping`);
+  // Don't spend more than 5% of bankroll on total analysis cost (deep analysis across all batches)
+  if (estimatedCost > bankroll * 0.05) {
+    log(`Analysis cost $${estimatedCost.toFixed(4)} > 5% of bankroll $${bankroll.toFixed(2)} — skipping`);
     return false;
   }
 
