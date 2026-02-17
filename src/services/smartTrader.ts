@@ -776,9 +776,8 @@ async function _runSmartCycleInner(
 
   log(`📦 Pool dividido en ${batches.length} batch(es) de ≤${MAX_POOL_FOR_ANALYSIS} mercados (diversificado por categoría)`);
 
-  // shouldAnalyze uses equity so AI cost check is proportional to total portfolio
-  const equityForAnalysis = portfolio.balance + portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
-  if (!shouldAnalyze(equityForAnalysis, batches[0]?.length || 0)) {
+  // shouldAnalyze uses available cash (true Kelly bankroll)
+  if (!shouldAnalyze(portfolio.balance, batches[0]?.length || 0)) {
     const msg = "💸 Costo de IA excede límite seguro para bankroll actual.";
     activities.push(activity(msg, "Warning"));
     debugLog.error = msg;
@@ -829,12 +828,11 @@ async function _runSmartCycleInner(
     let aiResult: ClaudeResearchResult;
 
     try {
-      const equityForClaude = updatedPortfolio.balance + updatedPortfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
-
+      // Tell Claude the available cash (true Kelly bankroll)
       aiResult = await analyzeMarketsWithClaude(
         batch,
         updatedPortfolio.openOrders,
-        equityForClaude,
+        updatedPortfolio.balance,
         claudeModel,
         perfHistory,
       );
@@ -941,15 +939,13 @@ async function _runSmartCycleInner(
       log(`\n  📌 "${analysis.question.slice(0, 55)}"`);
       log(`     ${analysis.recommendedSide} | pMkt(real)=${(enrichedAnalysis.pMarket * 100).toFixed(1)}% | pReal=${(analysis.pReal * 100).toFixed(1)}% | edge=${(enrichedAnalysis.edge * 100).toFixed(1)}% | conf=${analysis.confidence} | ${minutesLeft}min`);
 
-      const investedInOrders = updatedPortfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
-      const equity = updatedPortfolio.balance + investedInOrders;
+      // True Kelly: bankroll = available cash (not total equity)
       const kelly = calculateKellyBet(
         enrichedAnalysis,
         market,
-        equity,
+        updatedPortfolio.balance,
         aiResult.usage.costUsd,
         Math.max(1, aiResult.analyses.length),
-        updatedPortfolio.balance,
       );
 
       rr.kellyResult = kelly;

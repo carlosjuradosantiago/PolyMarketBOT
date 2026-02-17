@@ -3,14 +3,15 @@
  * 
  * Implements fractional Kelly with:
  * - AI cost factoring (deducted from edge before sizing)
- * - Bankroll safety limits (never >10%, min edge 5%)
+ * - Bankroll = AVAILABLE CASH (not total equity)
  * - MIN_BET_USD = $1 (Polymarket platform minimum)
  * - If bankroll < MIN_BET → skip AI entirely (no wasted tokens)
  * - Dynamic scan interval based on activity
  *
- * Philosophy: Kelly is self-regulating. It naturally reduces bet sizes as
- * bankroll shrinks. No artificial "stop loss" needed — the only hard floor
- * is Polymarket's own $1 minimum order size.
+ * Philosophy: True Kelly — bankroll = your available cash right now.
+ * As you place bets, your remaining cash shrinks and Kelly naturally
+ * sizes subsequent bets smaller. When bets resolve and cash returns,
+ * Kelly sizes larger again. No artificial "stop loss" needed.
  */
 
 import { MarketAnalysis, KellyResult, AIUsage, PolymarketMarket } from "../types";
@@ -68,11 +69,8 @@ export function calculateKellyBet(
   bankroll: number,
   aiCostForThisBatch: number,
   marketsInBatch: number,
-  availableCash?: number,
 ): KellyResult {
-  // bankroll = total equity (balance + invested in open orders)
-  // availableCash = free cash available to actually place bets
-  const cashLimit = availableCash ?? bankroll;
+  // bankroll = available cash (true Kelly: always bet fraction of what you have NOW)
   const side = analysis.recommendedSide;
 
   // Default "don't bet" result
@@ -157,9 +155,6 @@ export function calculateKellyBet(
   // Apply limits
   const cappedFraction = Math.min(fractional, MAX_BET_FRACTION);
   let betAmount = bankroll * cappedFraction;
-
-  // Cap at available cash (can't bet money locked in open orders)
-  betAmount = Math.min(betAmount, cashLimit);
 
   // Must meet minimum
   if (betAmount < MIN_BET_USD) {
