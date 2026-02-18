@@ -664,11 +664,13 @@ Output ONLY valid JSON (no code fence, no extra text):
 
 export function estimateAnalysisCost(marketCount: number, model?: string): number {
   const modelId = model || "claude-sonnet-4-20250514";
-  // Deep analysis with unlimited web_search: ~2000 tokens per market (search results inflate input)
-  // Batches of 4 markets each, but estimate total cost for all markets
+  // Realistic estimates based on observed data (cycles 271-272):
+  //   ~222K input tokens per batch of 4 (prompt ~3.3K + web_search results ~218K)
+  //   ~1,300 output tokens per batch of 4
+  // Total for 5 batches (20 markets): ~1.1M input, ~6.5K output = ~$3.40
   const batchCount = Math.ceil(marketCount / 4);
-  const estInputPerBatch = 2000 + (4 * 2000); // prompt + search results per batch
-  const estOutputPerBatch = 500 + (4 * 400);   // detailed analysis per market
+  const estInputPerBatch = 220_000;  // web search results dominate (~10-15 searches * 15K each)
+  const estOutputPerBatch = 1_400;   // JSON response per batch
   const estInput = batchCount * estInputPerBatch;
   const estOutput = batchCount * estOutputPerBatch;
   return calculateTokenCost(estInput, estOutput, modelId);

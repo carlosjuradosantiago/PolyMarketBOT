@@ -841,9 +841,21 @@ async function _runSmartCycleInner(
       lastAiResult = aiResult;
       totalAICostCycle += aiResult.usage.costUsd;
 
-      // Update debug log with latest batch info
-      debugLog.prompt = aiResult.prompt;
-      debugLog.rawResponse = aiResult.rawResponse;
+      // Accumulate prompts & responses from ALL batches (not just the last one)
+      // For prompt: keep first batch's full prompt, append only MARKETS section from subsequent batches
+      if (batchIdx === 0) {
+        debugLog.prompt = aiResult.prompt;
+        debugLog.rawResponse = aiResult.rawResponse;
+      } else {
+        // Extract the MARKETS section only (the market list lines) to avoid duplicating the full template
+        const marketsIdx = aiResult.prompt.indexOf("MARKETS (");
+        const processIdx = aiResult.prompt.indexOf("\nPROCESS:", marketsIdx);
+        const marketSection = marketsIdx >= 0
+          ? aiResult.prompt.slice(marketsIdx, processIdx >= 0 ? processIdx : marketsIdx + 2000)
+          : `[Batch ${batchIdx + 1}: ${batch.length} markets]`;
+        debugLog.prompt += `\n\n═══ BATCH ${batchIdx + 1}/${batches.length} ═══\n${marketSection}`;
+        debugLog.rawResponse += `\n\n═══ BATCH ${batchIdx + 1}/${batches.length} ═══\n${aiResult.rawResponse}`;
+      }
       debugLog.inputTokens += aiResult.usage.inputTokens;
       debugLog.outputTokens += aiResult.usage.outputTokens;
       debugLog.costUsd += aiResult.usage.costUsd;
