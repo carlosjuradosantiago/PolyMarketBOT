@@ -9,27 +9,26 @@ interface StatsPanelProps {
 export default function StatsPanel({ stats }: StatsPanelProps) {
   const { t } = useTranslation();
   return (
-    <div className="grid grid-cols-2 gap-3 px-4 pb-4">
+    <div className="grid grid-cols-2 gap-2.5 px-5 pb-3">
       {/* Survival Card */}
-      <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
-        <div className="text-xs font-semibold tracking-wider text-bot-muted uppercase mb-2">
+      <div className="glass-card rounded-xl px-4 py-3">
+        <div className="text-[9px] font-display font-bold tracking-[0.2em] text-bot-muted/50 uppercase mb-2.5">
           {t("stats.survival")}
         </div>
-        <div className="grid grid-cols-2 gap-y-1.5 text-xs">
+        <div className="grid grid-cols-2 gap-y-2 text-xs">
           <StatRow
             label={t("stats.dailyAPICost")}
             value={`~${formatCurrency(stats.daily_api_cost)}`}
-            color="text-bot-red"
+            color="text-bot-red/80"
           />
           <StatRow
             label={t("stats.runway")}
             value={t("stats.runwayDays", formatNumber(stats.runway_days))}
             color="text-white"
           >
-            {/* Runway bar */}
-            <div className="w-16 h-1 bg-bot-border rounded-full mt-0.5">
+            <div className="w-16 h-1 bg-bot-border/50 rounded-full mt-1 overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-bot-green to-bot-cyan rounded-full"
+                className="h-full rounded-full bg-gradient-to-r from-bot-green to-bot-cyan"
                 style={{
                   width: `${Math.min(100, (stats.runway_days / 2000) * 100)}%`,
                 }}
@@ -40,7 +39,7 @@ export default function StatsPanel({ stats }: StatsPanelProps) {
       </div>
 
       {/* Performance Card */}
-      <div className="bg-bot-card border border-bot-border rounded-lg px-4 py-3">
+      <div className="glass-card rounded-xl px-4 py-3">
         <div className="grid grid-cols-7 gap-3 text-center">
           <StatCol label={t("stats.trades")} value={stats.total_trades.toString()} />
           <StatCol
@@ -88,9 +87,9 @@ function StatRow({
 }) {
   return (
     <>
-      <span className="text-bot-muted">{label}</span>
+      <span className="text-bot-muted/60 text-[11px]">{label}</span>
       <div>
-        <span className={`font-semibold ${color}`}>{value}</span>
+        <span className={`font-mono font-semibold text-[11px] ${color}`}>{value}</span>
         {children}
       </div>
     </>
@@ -108,8 +107,8 @@ function StatCol({
 }) {
   return (
     <div>
-      <div className={`text-sm font-bold ${color}`}>{value}</div>
-      <div className="text-[10px] text-bot-muted uppercase tracking-wider mt-0.5">
+      <div className={`text-sm font-display font-bold ${color}`}>{value}</div>
+      <div className="text-[9px] text-bot-muted/40 font-display uppercase tracking-wider mt-0.5">
         {label}
       </div>
     </div>

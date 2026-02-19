@@ -567,7 +567,7 @@ function App() {
   }, [config, addActivity, updateStatsFromPortfolio]);
 
   return (
-    <div className="w-full h-full bg-bot-bg flex flex-col overflow-hidden">
+    <div className="w-full h-full bg-bot-bg flex flex-col overflow-hidden relative z-10">
       {/* Header */}
       <Header
         stats={stats}
@@ -582,33 +582,35 @@ function App() {
       />
 
       {/* Navigation Tabs */}
-      <div className="px-4 pt-2">
-        <div className="flex gap-2 bg-bot-card rounded-lg p-1 border border-bot-border w-fit">
+      <div className="px-5 pt-3">
+        <div className="flex items-center gap-1 bg-bot-surface/50 backdrop-blur-sm rounded-xl p-1 border border-bot-border/40 w-fit">
           {[
-            { id: "dashboard", label: t("tab.dashboard"), icon: "" },
-            { id: "markets", label: t("tab.markets"), icon: "" },
-            { id: "orders", label: t("tab.orders"), icon: "" },
-            { id: "ai", label: t("tab.ai"), icon: "" },
-            { id: "console", label: isAnalyzing ? t("tab.analyzing") : `${t("tab.console")} ${countdown > 0 ? `(${countdown >= 3600 ? `${Math.floor(countdown/3600)}h${String(Math.floor((countdown%3600)/60)).padStart(2,'0')}m` : `${Math.floor(countdown/60)}:${String(countdown%60).padStart(2,'0')}`})` : ""}`, icon: "" },
+            { id: "dashboard", label: t("tab.dashboard"), icon: "◈" },
+            { id: "markets", label: t("tab.markets"), icon: "◉" },
+            { id: "orders", label: t("tab.orders"), icon: "◎" },
+            { id: "ai", label: t("tab.ai"), icon: "◆" },
+            { id: "console", label: isAnalyzing ? t("tab.analyzing") : `${t("tab.console")} ${countdown > 0 ? `(${countdown >= 3600 ? `${Math.floor(countdown/3600)}h${String(Math.floor((countdown%3600)/60)).padStart(2,'0')}m` : `${Math.floor(countdown/60)}:${String(countdown%60).padStart(2,'0')}`})` : ""}`, icon: "▣" },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setViewMode(tab.id as ViewMode)}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all
+              className={`px-4 py-1.5 rounded-lg text-xs font-display font-semibold transition-all flex items-center gap-1.5
                 ${viewMode === tab.id
-                  ? "bg-bot-green text-black"
-                  : "text-gray-400 hover:text-white hover:bg-white/5"
+                  ? "tab-active"
+                  : "text-bot-muted hover:text-white hover:bg-white/[0.03]"
                 }`}
             >
+              <span className="text-[10px] opacity-60">{tab.icon}</span>
               {tab.label}
             </button>
           ))}
           
           {/* Reset Button */}
+          <div className="w-px h-5 bg-bot-border/30 mx-1" />
           <button
             onClick={handleReset}
-            className="px-4 py-2 rounded-md text-sm font-medium text-red-400 
-                     hover:text-red-300 hover:bg-red-500/10 transition-all ml-2"
+            className="px-3 py-1.5 rounded-lg text-xs font-display font-medium text-bot-red/60 
+                     hover:text-bot-red hover:bg-bot-red/5 border border-transparent hover:border-bot-red/15 transition-all"
           >
             {t("tab.reset")}
           </button>
@@ -619,22 +621,22 @@ function App() {
       <TopCards stats={stats} walletInfo={walletInfo} />
 
       {/* Main Content */}
-      <div className="flex-1 flex gap-3 px-4 pb-3 min-h-0 overflow-hidden">
+      <div className="flex-1 flex gap-2.5 px-5 pb-3 min-h-0 overflow-hidden">
         {viewMode === "dashboard" && (
           <>
             {/* Chart */}
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 animate-fade-in">
               <BalanceChart history={balanceHistory} />
             </div>
             {/* Activity Log */}
-            <div className="w-[420px] flex-shrink-0">
+            <div className="w-[420px] flex-shrink-0 animate-slide-in-right">
               <ActivityLog activities={activities} />
             </div>
           </>
         )}
 
         {viewMode === "markets" && (
-          <div className="flex-1 min-w-0 overflow-auto">
+          <div className="flex-1 min-w-0 overflow-auto animate-fade-in">
             <MarketsPanel
               portfolio={portfolio}
               onPortfolioUpdate={handlePortfolioUpdate}
@@ -644,7 +646,7 @@ function App() {
         )}
 
         {viewMode === "orders" && (
-          <div className="flex-1 min-w-0 overflow-auto">
+          <div className="flex-1 min-w-0 overflow-auto animate-fade-in">
             <OrdersPanel
               portfolio={portfolio}
               onPortfolioUpdate={handlePortfolioUpdate}
@@ -655,7 +657,7 @@ function App() {
         )}
 
         {viewMode === "ai" && (
-          <div className="flex-1 min-w-0 overflow-auto">
+          <div className="flex-1 min-w-0 overflow-auto animate-fade-in">
             <AIPanel
               aiCostTracker={aiCostTracker}
               lastKellyResults={lastKellyResults}
@@ -671,7 +673,7 @@ function App() {
         )}
 
         {viewMode === "console" && (
-          <div className="flex-1 min-w-0 overflow-auto">
+          <div className="flex-1 min-w-0 overflow-auto animate-fade-in">
             <ConsolePanel
               isAnalyzing={isAnalyzing}
               countdown={countdown}
