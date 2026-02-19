@@ -60,19 +60,19 @@ export default function BalanceChart({ history }: BalanceChartProps) {
     const up = diff >= 0;
 
     return (
-      <div className="bg-[#0d0d12] border border-gray-700/60 rounded-lg px-4 py-3 shadow-2xl backdrop-blur-sm">
+      <div className="glass-card rounded-lg px-4 py-3 shadow-2xl">
         <div className="flex items-baseline gap-2 mb-1">
-          <span className="text-white font-bold text-lg font-mono">
+          <span className="text-white font-display font-bold text-lg">
             {formatCurrency(val)}
           </span>
-          <span className={`text-xs font-semibold ${up ? "text-green-400" : "text-red-400"}`}>
+          <span className={`text-xs font-mono font-semibold ${up ? "text-bot-green" : "text-bot-red"}`}>
             {up ? "+" : ""}{formatCurrency(diff)} ({up ? "+" : ""}{diffPct.toFixed(2)}%)
           </span>
         </div>
-        <div className="text-[10px] text-gray-500 font-mono">
+        <div className="text-[10px] text-bot-muted/50 font-mono">
           {data.label}
           {data.timestamp && (
-            <span className="ml-2 text-gray-600">{data.timestamp}</span>
+            <span className="ml-2 text-bot-muted/30">{data.timestamp}</span>
           )}
         </div>
       </div>
@@ -97,40 +97,42 @@ export default function BalanceChart({ history }: BalanceChartProps) {
   };
 
   return (
-    <div className="bg-[#0a0a0f] border border-gray-800/60 rounded-xl h-full flex flex-col overflow-hidden">
+    <div className="glass-card rounded-xl h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800/40">
-        <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-bot-border/40">
+        <div className="flex items-center gap-5">
           <div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-0.5">
+            <div className="text-[9px] font-display font-bold text-bot-muted/60 uppercase tracking-[0.2em] mb-1">
               {t("chart.equity")}
             </div>
             <div className="flex items-baseline gap-3">
-              <span className="text-2xl font-bold text-white font-mono tracking-tight">
+              <span className="text-2xl font-display font-extrabold text-white tracking-tight">
                 {formatCurrency(currentBalance)}
               </span>
-              <span className={`text-sm font-semibold font-mono ${isPositive ? "text-green-400" : "text-red-400"}`}>
+              <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono font-bold ${
+                isPositive 
+                  ? "bg-bot-green/10 text-bot-green border border-bot-green/20" 
+                  : "bg-bot-red/10 text-bot-red border border-bot-red/20"
+              }`}>
                 {pnl >= 0 ? "+" : ""}{formatCurrency(pnl)}
-                <span className="text-xs ml-1 opacity-70">
+                <span className="opacity-60 text-[10px]">
                   ({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
                 </span>
-              </span>
+              </div>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Initial balance reference */}
+        <div className="flex items-center gap-4">
           <div className="text-right">
-            <div className="text-[9px] text-gray-600 uppercase">{t("chart.initial")}</div>
-            <div className="text-xs text-gray-400 font-mono">{formatCurrency(initialBalance)}</div>
+            <div className="text-[8px] font-display text-bot-muted/40 uppercase tracking-widest">{t("chart.initial")}</div>
+            <div className="text-xs text-bot-gray font-mono">{formatCurrency(initialBalance)}</div>
           </div>
-          {/* Timeframe badges */}
-          <div className="flex gap-1">
+          <div className="flex gap-0.5 bg-bot-surface/50 rounded-lg p-0.5 border border-bot-border/30">
             {["1D", "1W", "1M", "ALL"].map((tf, i) => (
               <span
                 key={tf}
-                className={`px-2 py-0.5 text-[9px] font-bold rounded cursor-default ${
-                  i === 3 ? "bg-white/10 text-white" : "text-gray-600 hover:text-gray-400"
+                className={`px-2.5 py-1 text-[9px] font-display font-bold rounded-md cursor-default transition-all ${
+                  i === 3 ? "bg-white/8 text-white" : "text-bot-muted/40 hover:text-bot-muted"
                 }`}
               >
                 {tf}
@@ -146,39 +148,44 @@ export default function BalanceChart({ history }: BalanceChartProps) {
           <AreaChart data={chartData} margin={{ top: 16, right: 16, left: 0, bottom: 8 }}>
             <defs>
               <linearGradient id="equityGradientGreen" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#22c55e" stopOpacity={0.25} />
-                <stop offset="40%" stopColor="#22c55e" stopOpacity={0.08} />
-                <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
+                <stop offset="0%" stopColor="#00e87b" stopOpacity={0.2} />
+                <stop offset="30%" stopColor="#00e87b" stopOpacity={0.08} />
+                <stop offset="100%" stopColor="#00e87b" stopOpacity={0} />
               </linearGradient>
               <linearGradient id="equityGradientRed" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#ef4444" stopOpacity={0.25} />
-                <stop offset="40%" stopColor="#ef4444" stopOpacity={0.08} />
-                <stop offset="100%" stopColor="#ef4444" stopOpacity={0} />
+                <stop offset="0%" stopColor="#ff3b5c" stopOpacity={0.2} />
+                <stop offset="30%" stopColor="#ff3b5c" stopOpacity={0.08} />
+                <stop offset="100%" stopColor="#ff3b5c" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="lineGradientGreen" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#00e87b" stopOpacity={0.6} />
+                <stop offset="50%" stopColor="#06d6f0" stopOpacity={0.8} />
+                <stop offset="100%" stopColor="#00e87b" stopOpacity={1} />
               </linearGradient>
             </defs>
             <CartesianGrid
               strokeDasharray="4 4"
               stroke="#1a1a2e"
               horizontal={true}
-              vertical={true}
-              opacity={0.5}
+              vertical={false}
+              opacity={0.4}
             />
             {/* Initial balance reference line */}
             <ReferenceLine
               y={initialBalance}
-              stroke="#666"
+              stroke="#252540"
               strokeDasharray="8 4"
-              strokeOpacity={0.4}
+              strokeOpacity={0.6}
               label={{
                 value: formatCurrency(initialBalance, 0),
                 position: "right",
-                fill: "#555",
+                fill: "#555570",
                 fontSize: 9,
               }}
             />
             <XAxis
               dataKey="label"
-              tick={{ fill: "#4a4a6a", fontSize: 10, fontFamily: "monospace" }}
+              tick={{ fill: "#555570", fontSize: 10, fontFamily: "JetBrains Mono" }}
               axisLine={{ stroke: "#1a1a2e" }}
               tickLine={false}
               interval="preserveStartEnd"
@@ -186,7 +193,7 @@ export default function BalanceChart({ history }: BalanceChartProps) {
             />
             <YAxis
               domain={yDomain}
-              tick={{ fill: "#4a4a6a", fontSize: 10, fontFamily: "monospace" }}
+              tick={{ fill: "#555570", fontSize: 10, fontFamily: "JetBrains Mono" }}
               axisLine={false}
               tickLine={false}
               tickFormatter={(val) => `$${val.toFixed(0)}`}
@@ -201,31 +208,31 @@ export default function BalanceChart({ history }: BalanceChartProps) {
             <Area
               type="monotone"
               dataKey="balance"
-              stroke={accentColor}
-              strokeWidth={2.5}
+              stroke={isPositive ? "#00e87b" : "#ff3b5c"}
+              strokeWidth={2}
               fill={isPositive ? "url(#equityGradientGreen)" : "url(#equityGradientRed)"}
               animationDuration={400}
               dot={false}
               activeDot={{
-                r: 5,
+                r: 4,
                 stroke: accentColor,
-                strokeWidth: 2.5,
-                fill: "#0a0a0f",
+                strokeWidth: 2,
+                fill: "#060609",
               }}
             />
           </AreaChart>
         </ResponsiveContainer>
 
-        {/* Current price tag on right edge */}
+        {/* Current price tag */}
         <div
           className="absolute right-3 pointer-events-none flex items-center gap-1"
           style={{ top: "16px" }}
         >
           <div
-            className={`px-2 py-1 rounded text-xs font-bold font-mono shadow-lg ${
+            className={`px-2.5 py-1 rounded-md text-xs font-display font-bold shadow-lg border ${
               isPositive
-                ? "bg-green-500 text-black"
-                : "bg-red-500 text-white"
+                ? "bg-bot-green/90 text-black border-bot-green/50"
+                : "bg-bot-red/90 text-white border-bot-red/50"
             }`}
           >
             {formatCurrency(currentBalance)}

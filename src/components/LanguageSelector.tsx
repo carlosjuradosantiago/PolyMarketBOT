@@ -21,7 +21,7 @@ export default function LanguageSelector() {
           {i > 0 && <span className="text-bot-gray mx-0.5">|</span>}
           <button
             onClick={() => setLocale(opt.value)}
-            className={`px-1 py-0.5 rounded transition-colors font-semibold ${
+            className={`px-1 py-0.5 rounded transition-colors font-display font-semibold ${
               locale === opt.value
                 ? "text-bot-cyan bg-bot-cyan/10"
                 : "text-bot-muted hover:text-white"
