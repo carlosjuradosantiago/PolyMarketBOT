@@ -116,6 +116,17 @@ export function calculateKellyBet(
     return skipResult;
   }
 
+  // ── Lottery Zone: cheap markets need higher conviction ────────
+  // Below 20¢ the payoff looks huge but data quality is usually poor.
+  // Dragon Ball (5.5¢, conf 60) → -$5.50, Love is Blind (17¢, conf 65) → -$17.
+  // Gate: require confidence ≥ 70 for any market < 20¢.
+  const LOTTERY_PRICE_THRESHOLD = 0.20;
+  const LOTTERY_MIN_CONFIDENCE = 70;
+  if (targetPrice < LOTTERY_PRICE_THRESHOLD && analysis.confidence < LOTTERY_MIN_CONFIDENCE) {
+    skipResult.reasoning = `LOTTERY ZONE: price ${(targetPrice * 100).toFixed(1)}¢ < ${(LOTTERY_PRICE_THRESHOLD * 100)}¢ needs confidence ≥ ${LOTTERY_MIN_CONFIDENCE}, got ${analysis.confidence}`;
+    return skipResult;
+  }
+
   // Determine which side to bet
   let pReal: number;
   let pMarket: number;
@@ -144,6 +155,27 @@ export function calculateKellyBet(
   // Calculate raw edge
   const grossEdge = pReal - pMarket;
 
+  // ── Narrow Bin Weather Rule ────────────────────────────────────
+  // Temperature bins of 1°C/1°F have high forecast uncertainty.
+  // When forecast μ ≈ bin center, the outcome is essentially a coin flip.
+  // Require higher confidence + edge for these markets (code-level enforcement).
+  const NARROW_BIN_RE = /\d+(\.\d+)?\s*°[CF]\s*(to|and|[-–])\s*\d+(\.\d+)?\s*°[CF]/i;
+  if (NARROW_BIN_RE.test(market.question)) {
+    const MIN_NARROW_BIN_CONFIDENCE = 75;
+    const MIN_NARROW_BIN_EDGE = 0.12; // 12% minimum edge for 1° bins
+    if (analysis.confidence < MIN_NARROW_BIN_CONFIDENCE) {
+      skipResult.edge = grossEdge;
+      skipResult.reasoning = `NARROW BIN: confidence ${analysis.confidence} < ${MIN_NARROW_BIN_CONFIDENCE} required for 1° weather bins`;
+      return skipResult;
+    }
+    if (grossEdge < MIN_NARROW_BIN_EDGE) {
+      skipResult.edge = grossEdge;
+      skipResult.reasoning = `NARROW BIN: edge ${(grossEdge * 100).toFixed(1)}% < ${(MIN_NARROW_BIN_EDGE * 100)}% required for 1° weather bins`;
+      return skipResult;
+    }
+    log(`🌡️ Narrow bin weather — passed (conf=${analysis.confidence}, edge=${(grossEdge * 100).toFixed(1)}%)`);
+  }
+
   // Factor in AI cost per bet
   const aiCostPerBet = aiCostForThisBatch / Math.max(1, marketsInBatch);
 
@@ -155,6 +187,16 @@ export function calculateKellyBet(
   // Apply limits
   const cappedFraction = Math.min(fractional, MAX_BET_FRACTION);
   let betAmount = bankroll * cappedFraction;
+
+  // ── Lottery Zone position cap: even with high confidence, limit to 3% ──
+  const LOTTERY_MAX_BET_FRACTION = 0.03;
+  if (pMarket < LOTTERY_PRICE_THRESHOLD) {
+    const lotteryMax = bankroll * LOTTERY_MAX_BET_FRACTION;
+    if (betAmount > lotteryMax) {
+      log(`🎰 Lottery cap: $${betAmount.toFixed(2)} → $${lotteryMax.toFixed(2)} (3% max for < 20¢)`);
+      betAmount = lotteryMax;
+    }
+  }
 
   // Must meet minimum
   if (betAmount < MIN_BET_USD) {

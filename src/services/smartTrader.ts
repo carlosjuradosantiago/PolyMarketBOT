@@ -946,6 +946,18 @@ async function _runSmartCycleInner(
       rr.pMarket = enrichedAnalysis.pMarket;
       rr.edge = enrichedAnalysis.edge;
 
+      // ── EDGE GUARD (post-enrichment) ──────────────────────────────
+      // Claude's edge guard uses Claude-reported pMarket, but real market
+      // prices can differ → enriched edge may exceed 40%.
+      // Example: Crime 101 passed Claude guard at 38% but enriched to 78%.
+      const MAX_ENRICHED_EDGE = 0.40;
+      if (enrichedAnalysis.edge > MAX_ENRICHED_EDGE) {
+        rr.decision = `SKIP — EDGE GUARD (enriched): ${(enrichedAnalysis.edge * 100).toFixed(1)}% > ${(MAX_ENRICHED_EDGE * 100)}% cap`;
+        debugLog.results.push(rr);
+        log(`     🚫 EDGE GUARD (enriched): edge ${(enrichedAnalysis.edge * 100).toFixed(1)}% > ${(MAX_ENRICHED_EDGE * 100)}% — likely stale price or hallucinated resolution. SKIP`);
+        continue;
+      }
+
       const endMs = new Date(market.endDate).getTime();
       const minutesLeft = Math.max(0, Math.round((endMs - now) / 60000));
 
