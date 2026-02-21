@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Portfolio, PaperOrder } from "../types";
 import { cancelPaperOrder } from "../services/paperTrading";
 import { PaperPriceMap } from "../services/polymarket";
@@ -15,7 +15,7 @@ interface OrdersPanelProps {
 type OrderTab = "active" | "won" | "lost" | "cancelled";
 type TFunc = (...args: any[]) => string;
 
-// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helpers ────────────────────────────────────────────────
 
 function formatDate(dateStr: string, locale: string) {
   return new Date(dateStr).toLocaleString(locale === "es" ? "es-ES" : "en-US", {
@@ -132,7 +132,7 @@ function getTimeProgress(createdAt: string, endDate?: string): number {
   return Math.min(100, Math.max(0, ((now - start) / total) * 100));
 }
 
-// â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Main Component ─────────────────────────────────────────
 
 export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, paperPrices }: OrdersPanelProps) {
   const [activeTab, setActiveTab] = useState<OrderTab>("active");
@@ -203,15 +203,15 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
   }
 
   const tabs: { id: OrderTab; label: string; count: number; icon: string; color: string; activeColor: string }[] = [
-    { id: "active",    label: t("orders.tabActive"),    count: openOrders.length,      icon: "âš¡", color: "text-bot-cyan",    activeColor: "bg-bot-cyan"    },
-    { id: "won",       label: t("orders.tabWon"),       count: wonOrders.length,       icon: "ðŸ†", color: "text-bot-green",   activeColor: "bg-bot-green"   },
-    { id: "lost",      label: t("orders.tabLost"),      count: lostOrders.length,      icon: "ðŸ’€", color: "text-bot-red",     activeColor: "bg-bot-red"     },
-    { id: "cancelled", label: t("orders.tabCancelled"), count: cancelledOrders.length, icon: "ðŸš«", color: "text-bot-muted/50", activeColor: "bg-bot-muted"   },
+    { id: "active",    label: t("orders.tabActive"),    count: openOrders.length,      icon: "⚡", color: "text-bot-cyan",    activeColor: "bg-bot-cyan"    },
+    { id: "won",       label: t("orders.tabWon"),       count: wonOrders.length,       icon: "🏆", color: "text-bot-green",   activeColor: "bg-bot-green"   },
+    { id: "lost",      label: t("orders.tabLost"),      count: lostOrders.length,      icon: "💀", color: "text-bot-red",     activeColor: "bg-bot-red"     },
+    { id: "cancelled", label: t("orders.tabCancelled"), count: cancelledOrders.length, icon: "🚫", color: "text-bot-muted/50", activeColor: "bg-bot-muted"   },
   ];
 
   return (
     <div className="space-y-4">
-      {/* â”€â”€ Hero Stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Hero Stats ──────────────────────────────────── */}
       <div className="bg-bot-card border border-bot-border rounded-2xl p-5">
         <div className="grid grid-cols-7 gap-4">
           {/* Balance en juego */}
@@ -237,7 +237,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
             <div className="text-[10px] text-bot-muted/50 uppercase tracking-wider font-semibold mb-1">{t("orders.potentialPayout")}</div>
             <div className="text-2xl font-black text-cyan-400">${totalPendingPayout.toFixed(2)}</div>
             <div className="text-xs text-bot-muted/50 mt-0.5">
-              {totalInvested > 0 ? `+${((totalPendingPayout / totalInvested - 1) * 100).toFixed(0)}% ${t("orders.return")}` : "â€”"}
+              {totalInvested > 0 ? `+${((totalPendingPayout / totalInvested - 1) * 100).toFixed(0)}% ${t("orders.return")}` : "—"}
             </div>
           </div>
           {/* Ganado */}
@@ -277,7 +277,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
         </div>
       </div>
 
-      {/* â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Tabs ─────────────────────────────────────── */}
       <div className="flex gap-1 bg-bot-card rounded-xl p-1 border border-bot-border">
         {tabs.map(tab => (
           <button
@@ -299,13 +299,13 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
         ))}
       </div>
 
-      {/* â”€â”€ Content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Content ──────────────────────────────────── */}
 
       {/* Active Orders */}
       {activeTab === "active" && (
         <div>
           {openOrders.length === 0 ? (
-            <EmptyState icon="ðŸ“­" title={t("orders.emptyActive")} subtitle={t("orders.emptyActiveHint")} />
+            <EmptyState icon="📭" title={t("orders.emptyActive")} subtitle={t("orders.emptyActiveHint")} />
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {openOrders.map(order => (
@@ -320,7 +320,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
       {activeTab === "won" && (
         <div>
           {wonOrders.length === 0 ? (
-            <EmptyState icon="ðŸ†" title={t("orders.emptyWon")} subtitle={t("orders.emptyWonHint")} />
+            <EmptyState icon="🏆" title={t("orders.emptyWon")} subtitle={t("orders.emptyWonHint")} />
           ) : (
             <>
               <WonSummaryBar orders={wonOrders} avgReturn={avgReturn} />
@@ -338,7 +338,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
       {activeTab === "lost" && (
         <div>
           {lostOrders.length === 0 ? (
-            <EmptyState icon="ðŸ›¡ï¸" title={t("orders.emptyLost")} subtitle={t("orders.emptyLostHint")} />
+            <EmptyState icon="🛡️" title={t("orders.emptyLost")} subtitle={t("orders.emptyLostHint")} />
           ) : (
             <>
               <LostSummaryBar orders={lostOrders} />
@@ -356,7 +356,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
       {activeTab === "cancelled" && (
         <div>
           {cancelledOrders.length === 0 ? (
-            <EmptyState icon="ðŸ“‹" title={t("orders.emptyCancelled")} subtitle={t("orders.emptyCancelledHint")} />
+            <EmptyState icon="📋" title={t("orders.emptyCancelled")} subtitle={t("orders.emptyCancelledHint")} />
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {cancelledOrders.map(order => (
@@ -370,7 +370,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
   );
 }
 
-// â”€â”€â”€ Empty State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Empty State ─────────────────────────────────────────
 
 function EmptyState({ icon, title, subtitle }: { icon: string; title: string; subtitle: string }) {
   return (
@@ -382,7 +382,7 @@ function EmptyState({ icon, title, subtitle }: { icon: string; title: string; su
   );
 }
 
-// â”€â”€â”€ Expandable Raw Section (for prompt/response) â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Expandable Raw Section (for prompt/response) ────────
 
 function ExpandableRawSection({ title, content, color }: { title: string; content?: string; color: "amber" | "teal" }) {
   const [open, setOpen] = useState(false);
@@ -406,7 +406,7 @@ function ExpandableRawSection({ title, content, color }: { title: string; conten
           {title}
         </span>
         <span className="text-[9px] text-bot-muted/50 font-mono">{t("orders.linesChars", String(lineCount), String(charCount))}</span>
-        <span className={`text-xs ${headerText} transition-transform ${open ? "rotate-180" : ""}`}>â–¼</span>
+        <span className={`text-xs ${headerText} transition-transform ${open ? "rotate-180" : ""}`}>▼</span>
       </button>
       {open && (
         <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
@@ -419,7 +419,7 @@ function ExpandableRawSection({ title, content, color }: { title: string; conten
   );
 }
 
-// â”€â”€â”€ AI Reasoning Panel (shared by all card types) â”€â”€â”€â”€â”€â”€â”€
+// ─── AI Reasoning Panel (shared by all card types) ───────
 
 function AIReasoningPanel({ order }: { order: PaperOrder }) {
   const ai = order.aiReasoning;
@@ -443,7 +443,7 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
       {/* Claude Analysis */}
       <div className="bg-purple-900/20 border border-purple-500/20 rounded-lg p-3">
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-sm">ðŸ¤–</span>
+          <span className="text-sm">🤖</span>
           <span className="text-[11px] font-bold text-purple-300 uppercase tracking-wider">{t("orders.aiAnalysis")}</span>
           <span className="ml-auto text-[10px] text-bot-muted/50 font-mono">{ai.model}</span>
         </div>
@@ -538,7 +538,7 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
             {ca.maxEntryPrice !== undefined && (
               <div className="bg-bot-surface/30 rounded-md p-2 text-center">
                 <div className="text-[9px] text-bot-muted/50 uppercase">{t("orders.maxEntry")}</div>
-                <div className="text-sm font-bold text-amber-400">{(ca.maxEntryPrice * 100).toFixed(0)}Â¢</div>
+                <div className="text-sm font-bold text-amber-400">{(ca.maxEntryPrice * 100).toFixed(0)}¢</div>
               </div>
             )}
             {ca.sizeUsd !== undefined && (
@@ -574,7 +574,7 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
       {/* Kelly Calculation */}
       <div className="bg-blue-900/20 border border-blue-500/20 rounded-lg p-3">
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-sm">ðŸ“</span>
+          <span className="text-sm">📐</span>
           <span className="text-[11px] font-bold text-blue-300 uppercase tracking-wider">{t("orders.kellyCalc")}</span>
         </div>
 
@@ -611,12 +611,12 @@ function AIReasoningPanel({ order }: { order: PaperOrder }) {
   );
 }
 
-// â”€â”€â”€ Active Order Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Active Order Card ───────────────────────────────────
 
 function ActiveOrderCard({ order, onCancel, paperPrices }: { order: PaperOrder; onCancel: (o: PaperOrder) => void; paperPrices: PaperPriceMap }) {
   const [expanded, setExpanded] = useState(false);
   const { t, locale } = useTranslation();
-  const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sÃ­";
+  const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sí";
   const probPct = order.price < 0.01 ? (order.price * 100).toFixed(1) : (order.price * 100).toFixed(0);
   const returnPct = ((order.potentialPayout / order.totalCost - 1) * 100).toFixed(0);
   const timeInfo = formatTimeRemaining(order.endDate, t);
@@ -656,7 +656,7 @@ function ActiveOrderCard({ order, onCancel, paperPrices }: { order: PaperOrder; 
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
                 expanded ? "bg-purple-500/20 text-purple-300 border-purple-500/40" : "bg-purple-500/10 text-purple-400/60 border-purple-500/20"
               }`}>
-                ðŸ§  {expanded ? t("orders.closeAI") : t("orders.seeAI")}
+                🧠 {expanded ? t("orders.closeAI") : t("orders.seeAI")}
               </span>
             )}
             <span className="text-[10px] text-bot-muted/50 whitespace-nowrap mt-0.5">
@@ -676,16 +676,16 @@ function ActiveOrderCard({ order, onCancel, paperPrices }: { order: PaperOrder; 
             {translateOutcome(order.outcome)}
           </span>
           <div className="flex items-center gap-1 text-xs text-bot-muted/60">
-            <span className="font-mono font-bold text-white">{probPct}Â¢</span>
+            <span className="font-mono font-bold text-white">{probPct}¢</span>
             {currentPrice != null && (
               <>
-                <span>â†’</span>
+                <span>→</span>
                 <span className={`font-mono font-bold ${currentPrice > order.price ? "text-green-400" : currentPrice < order.price ? "text-red-400" : "text-white"}`}>
-                  {(currentPrice * 100).toFixed(0)}Â¢
+                  {(currentPrice * 100).toFixed(0)}¢
                 </span>
               </>
             )}
-            <span>Ã—</span>
+            <span>×</span>
             <span className="font-mono font-bold text-white">{order.quantity.toFixed(1)}</span>
             <span>{t("orders.shares")}</span>
           </div>
@@ -748,7 +748,7 @@ function ActiveOrderCard({ order, onCancel, paperPrices }: { order: PaperOrder; 
                     ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
                     : "bg-blue-500/10 text-blue-400 border border-blue-500/15"
                   }`}>
-                  {timeInfo.expired ? "â³" : "â°"} {timeInfo.text}
+                  {timeInfo.expired ? "⏳" : "⏰"} {timeInfo.text}
                 </span>
               )}
             </div>
@@ -786,7 +786,7 @@ function ActiveOrderCard({ order, onCancel, paperPrices }: { order: PaperOrder; 
   );
 }
 
-// â”€â”€â”€ Won Summary Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Won Summary Bar ─────────────────────────────────────
 
 function WonSummaryBar({ orders, avgReturn }: { orders: PaperOrder[]; avgReturn: number }) {
   const totalProfit = orders.reduce((s, o) => s + (o.pnl || 0), 0);
@@ -815,15 +815,15 @@ function WonSummaryBar({ orders, avgReturn }: { orders: PaperOrder[]; avgReturn:
   );
 }
 
-// â”€â”€â”€ Won Order Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Won Order Card ──────────────────────────────────────
 
 function WonOrderCard({ order }: { order: PaperOrder }) {
   const [expanded, setExpanded] = useState(false);
   const { t, locale } = useTranslation();
-  const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sÃ­";
+  const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sí";
   const pnl = order.pnl || 0;
   const returnPct = ((pnl / order.totalCost) * 100).toFixed(0);
-  const holdTime = order.resolvedAt ? formatDuration(order.createdAt, order.resolvedAt) : "â€”";
+  const holdTime = order.resolvedAt ? formatDuration(order.createdAt, order.resolvedAt) : "—";
   const hasAI = !!order.aiReasoning;
 
   return (
@@ -846,7 +846,7 @@ function WonOrderCard({ order }: { order: PaperOrder }) {
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
                 expanded ? "bg-purple-500/20 text-purple-300 border-purple-500/40" : "bg-purple-500/10 text-purple-400/60 border-purple-500/20"
               }`}>
-                ðŸ§  {expanded ? t("orders.closeAI") : t("orders.seeAI")}
+                🧠 {expanded ? t("orders.closeAI") : t("orders.seeAI")}
               </span>
             )}
             <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-500/15 border border-green-500/25">
@@ -860,9 +860,9 @@ function WonOrderCard({ order }: { order: PaperOrder }) {
           <div className="flex items-center gap-2">
             <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold
               ${isYes ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"}`}>
-              {order.outcome} @ {(order.price * 100).toFixed(0)}Â¢
+              {order.outcome} @ {(order.price * 100).toFixed(0)}¢
             </span>
-            <span className="text-xs text-bot-muted/50">Ã— {order.quantity.toFixed(1)}</span>
+            <span className="text-xs text-bot-muted/50">× {order.quantity.toFixed(1)}</span>
           </div>
           <div className="text-right">
             <div className="text-lg font-black text-green-400">+${pnl.toFixed(2)}</div>
@@ -874,11 +874,11 @@ function WonOrderCard({ order }: { order: PaperOrder }) {
         <div className="flex items-center justify-between pt-2 border-t border-white/5 text-[11px]">
           <div className="flex items-center gap-3 text-bot-muted/50">
             <span>{t("orders.cost")} <span className="text-bot-muted/70 font-medium">${order.totalCost.toFixed(2)}</span></span>
-            <span>â†’</span>
+            <span>→</span>
             <span>{t("orders.payout")} <span className="text-green-400 font-medium">${order.potentialPayout.toFixed(2)}</span></span>
           </div>
           <div className="flex items-center gap-3 text-bot-muted/50">
-            <span>â± {holdTime}</span>
+            <span>⏱ {holdTime}</span>
             <span>{formatDateShort(order.resolvedAt || order.createdAt, locale)}</span>
           </div>
         </div>
@@ -890,7 +890,7 @@ function WonOrderCard({ order }: { order: PaperOrder }) {
   );
 }
 
-// â”€â”€â”€ Lost Summary Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Lost Summary Bar ────────────────────────────────────
 
 function LostSummaryBar({ orders }: { orders: PaperOrder[] }) {
   const totalLoss = orders.reduce((s, o) => s + (o.pnl || 0), 0);
@@ -920,14 +920,14 @@ function LostSummaryBar({ orders }: { orders: PaperOrder[] }) {
   );
 }
 
-// â”€â”€â”€ Lost Order Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Lost Order Card ─────────────────────────────────────
 
 function LostOrderCard({ order }: { order: PaperOrder }) {
   const [expanded, setExpanded] = useState(false);
   const { t, locale } = useTranslation();
-  const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sÃ­";
+  const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sí";
   const pnl = order.pnl || 0;
-  const holdTime = order.resolvedAt ? formatDuration(order.createdAt, order.resolvedAt) : "â€”";
+  const holdTime = order.resolvedAt ? formatDuration(order.createdAt, order.resolvedAt) : "—";
   const hasAI = !!order.aiReasoning;
 
   return (
@@ -950,11 +950,11 @@ function LostOrderCard({ order }: { order: PaperOrder }) {
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
                 expanded ? "bg-purple-500/20 text-purple-300 border-purple-500/40" : "bg-purple-500/10 text-purple-400/60 border-purple-500/20"
               }`}>
-                ðŸ§  {expanded ? t("orders.closeAI") : t("orders.seeAI")}
+                🧠 {expanded ? t("orders.closeAI") : t("orders.seeAI")}
               </span>
             )}
             <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500/15 border border-red-500/25">
-              <span className="text-sm">ðŸ’€</span>
+              <span className="text-sm">💀</span>
               <span className="text-[10px] font-black text-red-400 uppercase tracking-wide">{t("orders.lostLabel")}</span>
             </div>
           </div>
@@ -965,9 +965,9 @@ function LostOrderCard({ order }: { order: PaperOrder }) {
           <div className="flex items-center gap-2">
             <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold
               ${isYes ? "bg-green-500/10 text-green-400/70" : "bg-red-500/10 text-red-400/70"}`}>
-              {order.outcome} @ {(order.price * 100).toFixed(0)}Â¢
+              {order.outcome} @ {(order.price * 100).toFixed(0)}¢
             </span>
-            <span className="text-xs text-bot-muted/50">Ã— {order.quantity.toFixed(1)}</span>
+            <span className="text-xs text-bot-muted/50">× {order.quantity.toFixed(1)}</span>
           </div>
           <div className="text-right">
             <div className="text-lg font-black text-red-400">${pnl.toFixed(2)}</div>
@@ -979,11 +979,11 @@ function LostOrderCard({ order }: { order: PaperOrder }) {
         <div className="flex items-center justify-between pt-2 border-t border-white/5 text-[11px]">
           <div className="flex items-center gap-3 text-bot-muted/50">
             <span>{t("orders.investedLabel")} <span className="text-bot-muted/70 font-medium">${order.totalCost.toFixed(2)}</span></span>
-            <span>â†’</span>
+            <span>→</span>
             <span>{t("orders.recovered")} <span className="text-red-400/80 font-medium">$0.00</span></span>
           </div>
           <div className="flex items-center gap-3 text-bot-muted/50">
-            <span>â± {holdTime}</span>
+            <span>⏱ {holdTime}</span>
             <span>{formatDateShort(order.resolvedAt || order.createdAt, locale)}</span>
           </div>
         </div>
@@ -995,12 +995,12 @@ function LostOrderCard({ order }: { order: PaperOrder }) {
   );
 }
 
-// â”€â”€â”€ Cancelled Order Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Cancelled Order Card ────────────────────────────────
 
 function CancelledOrderCard({ order }: { order: PaperOrder }) {
   const [expanded, setExpanded] = useState(false);
   const { t, locale } = useTranslation();
-  const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sÃ­";
+  const isYes = order.outcome.toLowerCase() === "yes" || order.outcome.toLowerCase() === "sí";
   const hasAI = !!order.aiReasoning;
 
   return (
@@ -1020,7 +1020,7 @@ function CancelledOrderCard({ order }: { order: PaperOrder }) {
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
                 expanded ? "bg-purple-500/20 text-purple-300 border-purple-500/40" : "bg-purple-500/10 text-purple-400/60 border-purple-500/20"
               }`}>
-                ðŸ§  {expanded ? t("orders.closeAI") : t("orders.seeAI")}
+                🧠 {expanded ? t("orders.closeAI") : t("orders.seeAI")}
               </span>
             )}
             <span className="text-[10px] font-bold text-bot-muted/50 bg-gray-500/10 px-2 py-0.5 rounded border border-gray-500/20">
@@ -1032,7 +1032,7 @@ function CancelledOrderCard({ order }: { order: PaperOrder }) {
           <div className="flex items-center gap-2">
             <span className={`px-2 py-0.5 rounded text-[10px] font-bold
               ${isYes ? "bg-green-500/10 text-green-500/50" : "bg-red-500/10 text-red-500/50"}`}>
-              {order.outcome} @ {(order.price * 100).toFixed(0)}Â¢
+              {order.outcome} @ {(order.price * 100).toFixed(0)}¢
             </span>
             <span>{t("orders.refunded", order.totalCost.toFixed(2))}</span>
           </div>

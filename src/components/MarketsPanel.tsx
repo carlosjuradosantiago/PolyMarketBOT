@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   PolymarketMarket,
   MarketFilters,
@@ -30,14 +30,14 @@ interface MarketsProps {
 const timeframeValues: TimeframeFilter[] = ["1h", "4h", "8h", "1d", "3d", "7d", "all"];
 
 const categoryValues: { value: CategoryFilter; icon: string }[] = [
-  { value: "all", icon: "ðŸŒ" },
-  { value: "politics", icon: "ðŸ›ï¸" },
-  { value: "sports", icon: "âš½" },
-  { value: "crypto", icon: "â‚¿" },
-  { value: "entertainment", icon: "ðŸŽ¬" },
-  { value: "science", icon: "ðŸ”¬" },
-  { value: "business", icon: "ðŸ“ˆ" },
-  { value: "other", icon: "ðŸ“¦" },
+  { value: "all", icon: "🌐" },
+  { value: "politics", icon: "🏛️" },
+  { value: "sports", icon: "⚽" },
+  { value: "crypto", icon: "₿" },
+  { value: "entertainment", icon: "🎬" },
+  { value: "science", icon: "🔬" },
+  { value: "business", icon: "📈" },
+  { value: "other", icon: "📦" },
 ];
 
 export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity }: MarketsProps) {
@@ -126,7 +126,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
       return;
     }
 
-    // â•â•â• HARD CAP: max 10% of equity per manual bet â•â•â•
+    // ═══ HARD CAP: max 10% of equity per manual bet ═══
     const invested = portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
     const equity = portfolio.balance + invested;
     const maxBet = equity * 0.10;
@@ -154,7 +154,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
     if (result.order) {
       onPortfolioUpdate(result.portfolio);
       onActivity(
-        `ORDER $${result.order.totalCost.toFixed(2)} â†’ "${selectedMarket.outcomes[betOutcome]}" @ ${formatPrice(price)}`,
+        `ORDER $${result.order.totalCost.toFixed(2)} → "${selectedMarket.outcomes[betOutcome]}" @ ${formatPrice(price)}`,
         "Order"
       );
       setSelectedMarket(null);
@@ -168,12 +168,12 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
       <div className="p-4 border-b border-bot-border/20 bg-gradient-to-r from-bot-green/10 to-transparent">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-display font-semibold text-white flex items-center gap-2">
-            <span className="text-bot-green">â—ˆ</span> {t("markets.title")}
+            <span className="text-bot-green">◈</span> {t("markets.title")}
             <span className="text-xs text-bot-muted/50 font-normal font-sans">
               ({filteredMarkets.length.toLocaleString()} {t("markets.marketsCount")}{markets.length !== filteredMarkets.length ? ` ${t("markets.of")} ${markets.length.toLocaleString()}` : ""})
               {filters.botView && uniqueClusterCount < filteredMarkets.length && (
-                <span className="ml-1 text-cyan-400" title="After cluster dedup â€” what Claude actually sees">
-                  â†’ {uniqueClusterCount} unique
+                <span className="ml-1 text-cyan-400" title="After cluster dedup — what Claude actually sees">
+                  → {uniqueClusterCount} unique
                 </span>
               )}
             </span>
@@ -181,7 +181,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
           <div className="flex items-center gap-3">
             {loading && loadProgress && (
               <span className="text-xs text-cyan-400 animate-pulse">
-                ðŸ“¥ {loadProgress}
+                📥 {loadProgress}
               </span>
             )}
             <button
@@ -252,7 +252,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
             >
               <option value={0}>{t("markets.vol.none")}</option>
               <option value={500}>$500+</option>
-              <option value={1000}>$1K+ â­</option>
+              <option value={1000}>$1K+ ⭐</option>
               <option value={5000}>$5K+</option>
               <option value={10000}>$10K+</option>
               <option value={50000}>$50K+</option>
@@ -276,7 +276,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
               <option value={0}>{t("markets.liq.none" as any)}</option>
               <option value={500}>$500+</option>
               <option value={1000}>$1K+</option>
-              <option value={2000}>$2K+ â­</option>
+              <option value={2000}>$2K+ ⭐</option>
               <option value={5000}>$5K+</option>
               <option value={10000}>$10K+</option>
             </select>
@@ -300,7 +300,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
               <option value={4}>4h</option>
               <option value={8}>8h</option>
               <option value={24}>24h</option>
-              <option value={72}>72h â­</option>
+              <option value={72}>72h ⭐</option>
               <option value={168}>7d</option>
               <option value={720}>30d</option>
             </select>
@@ -322,7 +322,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
 
         {/* Filters Row 2: Toggle filters */}
         <div className="flex flex-wrap items-center gap-2 mt-2">
-          {/* Bot View â€” master toggle */}
+          {/* Bot View — master toggle */}
           <button
             onClick={() => setFilters({ ...filters, botView: !filters.botView })}
             className={`px-3 py-1.5 text-xs rounded-lg border transition-all font-medium
@@ -428,7 +428,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
 
         {!error && filteredMarkets.length === 0 && !loading && (
           <div className="p-8 text-center text-bot-muted/50">
-            <div className="text-4xl mb-2">ðŸ”</div>
+            <div className="text-4xl mb-2">🔍</div>
             {t("markets.noResults")}
           </div>
         )}
@@ -448,15 +448,15 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
                 </h3>
                 <div className="flex items-center gap-3 mt-2 text-xs text-bot-muted/50">
                   <span className="flex items-center gap-1">
-                    <span className="text-yellow-500">â±ï¸</span>
+                    <span className="text-yellow-500">⏱️</span>
                     {formatTimeRemaining(market.endDate)}
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="text-green-500">ðŸ“Š</span>
+                    <span className="text-green-500">📊</span>
                     {formatVolume(market.volume)}
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="text-blue-500">ðŸ’§</span>
+                    <span className="text-blue-500">💧</span>
                     {formatVolume(market.liquidity)}
                   </span>
                   <span className="px-2 py-0.5 bg-bot-border rounded text-bot-muted/60">
@@ -470,7 +470,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
               <div className="flex gap-2 shrink-0">
                 {market.outcomes.map((outcome, idx) => {
                   const price = parseFloat(market.outcomePrices[idx]);
-                  const isYes = outcome.toLowerCase() === "yes" || outcome.toLowerCase() === "sÃ­";
+                  const isYes = outcome.toLowerCase() === "yes" || outcome.toLowerCase() === "sí";
                   return (
                     <div
                       key={idx}
@@ -481,7 +481,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
                         {outcome}
                       </div>
                       <div className="text-lg font-bold text-white mt-0.5">
-                        {(price * 100).toFixed(0)}Â¢
+                        {(price * 100).toFixed(0)}¢
                       </div>
                     </div>
                   );
@@ -513,7 +513,7 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
                                        : "bg-bot-bg border-bot-border text-white hover:border-bot-green"
                                      }`}
                           >
-                            {outcome} @ {(price * 100).toFixed(0)}Â¢
+                            {outcome} @ {(price * 100).toFixed(0)}¢
                           </button>
                         );
                       })}
