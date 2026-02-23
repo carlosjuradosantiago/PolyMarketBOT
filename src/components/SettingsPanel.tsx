@@ -1,11 +1,13 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   X, Key, Bot, Sliders, Shield, Save, Eye, EyeOff,
   ExternalLink, Check, Search, Zap, Globe, AlertTriangle,
+  Loader2, XCircle, CheckCircle2,
 } from "lucide-react";
 import { BotConfig } from "../types";
 import type { AIProviderType, AIModelDef, AIProviderDef } from "../services/aiProviders";
 import { AI_PROVIDERS, getProvider, estimateCycleCost } from "../services/aiProviders";
+import { testApiKey } from "../services/aiService";
 import { useTranslation } from "../i18n";
 
 interface SettingsPanelProps {
@@ -25,6 +27,23 @@ export default function SettingsPanel({
   const [expandedProvider, setExpandedProvider] = useState<AIProviderType | null>(null);
   const { t } = useTranslation();
 
+  // ─── API Key Test State ──────────────────────────
+  const [keyTestStatus, setKeyTestStatus] = useState<
+    Record<string, "idle" | "testing" | "valid" | "invalid">
+  >({});
+  const [keyTestMessage, setKeyTestMessage] = useState<Record<string, string>>({});
+  // Track which keys have been validated (to prevent saving unverified keys)
+  const [validatedKeys, setValidatedKeys] = useState<Record<string, string>>({});
+  // Track pending (not yet tested) key edits — initialized from existing config
+  const [pendingKeys, setPendingKeys] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    AI_PROVIDERS.forEach((p) => {
+      const key = config.ai_api_keys?.[p.id] || (p.id === "anthropic" ? config.claude_api_key : "") || "";
+      if (key) initial[p.id] = key;
+    });
+    return initial;
+  });
+
   const toggleShow = (field: string) => {
     setShowKeys((prev) => ({ ...prev, [field]: !prev[field] }));
   };
@@ -34,13 +53,42 @@ export default function SettingsPanel({
   };
 
   const updateApiKey = (provider: AIProviderType, key: string) => {
-    setForm((prev) => ({
-      ...prev,
-      ai_api_keys: { ...prev.ai_api_keys, [provider]: key },
-      // Keep legacy field in sync
-      ...(provider === "anthropic" ? { claude_api_key: key } : {}),
-    }));
+    // Store in pending — won't be saved until validated
+    setPendingKeys((prev) => ({ ...prev, [provider]: key }));
+    // Reset test status when user edits the key
+    setKeyTestStatus((prev) => ({ ...prev, [provider]: "idle" }));
+    setKeyTestMessage((prev) => ({ ...prev, [provider]: "" }));
   };
+
+  const runApiKeyTest = useCallback(async (provider: AIProviderType) => {
+    const key = pendingKeys[provider];
+    if (!key || key.trim().length < 5) {
+      setKeyTestStatus((prev) => ({ ...prev, [provider]: "invalid" }));
+      setKeyTestMessage((prev) => ({ ...prev, [provider]: "API key vacía o muy corta" }));
+      return;
+    }
+
+    setKeyTestStatus((prev) => ({ ...prev, [provider]: "testing" }));
+    setKeyTestMessage((prev) => ({ ...prev, [provider]: "Verificando..." }));
+
+    const result = await testApiKey(provider, key);
+
+    if (result.valid) {
+      setKeyTestStatus((prev) => ({ ...prev, [provider]: "valid" }));
+      setKeyTestMessage((prev) => ({ ...prev, [provider]: result.message }));
+      // Mark as validated — now it can be saved
+      setValidatedKeys((prev) => ({ ...prev, [provider]: key }));
+      // Actually commit the key to the form
+      setForm((prev) => ({
+        ...prev,
+        ai_api_keys: { ...prev.ai_api_keys, [provider]: key },
+        ...(provider === "anthropic" ? { claude_api_key: key } : {}),
+      }));
+    } else {
+      setKeyTestStatus((prev) => ({ ...prev, [provider]: "invalid" }));
+      setKeyTestMessage((prev) => ({ ...prev, [provider]: result.message }));
+    }
+  }, [pendingKeys]);
 
   const selectProvider = (provider: AIProviderType) => {
     const providerDef = getProvider(provider);
@@ -74,6 +122,7 @@ export default function SettingsPanel({
   );
 
   // Count configured API keys
+  // Count configured API keys (only those actually saved in form)
   const configuredKeys = useMemo(() => {
     return AI_PROVIDERS.filter((p) => {
       const key =
@@ -176,13 +225,16 @@ export default function SettingsPanel({
                 />
                 <div className="space-y-2 mt-3">
                   {AI_PROVIDERS.map((provider) => {
-                    const apiKey =
+                    const savedKey =
                       form.ai_api_keys?.[provider.id] ||
                       (provider.id === "anthropic" ? form.claude_api_key : "") ||
                       "";
-                    const isConfigured = apiKey.length > 5;
+                    const displayKey = pendingKeys[provider.id] ?? savedKey;
+                    const isConfigured = savedKey.length > 5;
                     const isExpanded = expandedProvider === provider.id;
                     const isActive = form.ai_provider === provider.id;
+                    const testStatus = keyTestStatus[provider.id] || "idle";
+                    const testMsg = keyTestMessage[provider.id] || "";
 
                     return (
                       <div
@@ -234,13 +286,23 @@ export default function SettingsPanel({
                           {/* Status indicator */}
                           <div
                             className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
-                              isConfigured
+                              testStatus === "valid"
                                 ? "bg-emerald-500/15 text-emerald-400"
-                                : "bg-bot-surface/40 text-bot-muted/30"
+                                : testStatus === "invalid"
+                                  ? "bg-red-500/15 text-red-400"
+                                  : testStatus === "testing"
+                                    ? "bg-amber-500/15 text-amber-400"
+                                    : isConfigured
+                                      ? "bg-emerald-500/15 text-emerald-400"
+                                      : "bg-bot-surface/40 text-bot-muted/30"
                             }`}
                           >
-                            {isConfigured ? (
+                            {testStatus === "testing" ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : testStatus === "valid" || (isConfigured && testStatus !== "invalid") ? (
                               <Check className="w-3.5 h-3.5" />
+                            ) : testStatus === "invalid" ? (
+                              <XCircle className="w-3.5 h-3.5" />
                             ) : (
                               <Key className="w-3.5 h-3.5" />
                             )}
@@ -265,14 +327,91 @@ export default function SettingsPanel({
                         {/* Expanded Content */}
                         {isExpanded && (
                           <div className="px-4 pb-4 pt-1 border-t border-bot-border/10 space-y-3">
-                            <SecretInput
-                              label={`${provider.name} API Key`}
-                              value={apiKey}
-                              onChange={(v) => updateApiKey(provider.id, v)}
-                              show={showKeys[`ai_${provider.id}`]}
-                              onToggle={() => toggleShow(`ai_${provider.id}`)}
-                              placeholder={provider.apiKeyPrefix}
-                            />
+                            {/* API Key Input + Test Button */}
+                            <div className="space-y-1">
+                              <label className="text-xs text-bot-muted/50 uppercase tracking-wider font-display">
+                                {provider.name} API Key
+                              </label>
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <input
+                                    type={showKeys[`ai_${provider.id}`] ? "text" : "password"}
+                                    value={displayKey}
+                                    onChange={(e) => updateApiKey(provider.id, e.target.value)}
+                                    placeholder={provider.apiKeyPrefix}
+                                    className={`w-full bg-bot-surface/50 border rounded-lg px-3 py-2.5 pr-10 text-sm text-white placeholder-bot-muted/30 focus:outline-none transition-colors font-mono ${
+                                      testStatus === "valid"
+                                        ? "border-emerald-500/50 focus:border-emerald-500/60"
+                                        : testStatus === "invalid"
+                                          ? "border-red-500/50 focus:border-red-500/60"
+                                          : "border-bot-border/30 focus:border-bot-cyan/40"
+                                    }`}
+                                  />
+                                  <button
+                                    onClick={() => toggleShow(`ai_${provider.id}`)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-bot-muted hover:text-white transition-colors"
+                                  >
+                                    {showKeys[`ai_${provider.id}`] ? (
+                                      <EyeOff className="w-4 h-4" />
+                                    ) : (
+                                      <Eye className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                </div>
+                                {/* Verify Button */}
+                                <button
+                                  onClick={() => runApiKeyTest(provider.id)}
+                                  disabled={testStatus === "testing" || !displayKey || displayKey.length < 5}
+                                  className={`shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-display font-semibold border transition-all duration-200 ${
+                                    testStatus === "testing"
+                                      ? "bg-bot-surface/60 border-bot-border/30 text-bot-muted cursor-wait"
+                                      : testStatus === "valid"
+                                        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                                        : testStatus === "invalid"
+                                          ? "bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20"
+                                          : "bg-bot-cyan/10 border-bot-cyan/25 text-bot-cyan hover:bg-bot-cyan/20"
+                                  }`}
+                                >
+                                  {testStatus === "testing" ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : testStatus === "valid" ? (
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                  ) : testStatus === "invalid" ? (
+                                    <XCircle className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <Zap className="w-3.5 h-3.5" />
+                                  )}
+                                  {testStatus === "testing"
+                                    ? "Verificando..."
+                                    : testStatus === "valid"
+                                      ? "Válida"
+                                      : testStatus === "invalid"
+                                        ? "Reintentar"
+                                        : "Verificar"}
+                                </button>
+                              </div>
+                              {/* Test Result Message */}
+                              {testMsg && (
+                                <div
+                                  className={`flex items-center gap-1.5 text-[11px] mt-1.5 px-2 py-1.5 rounded-md ${
+                                    testStatus === "valid"
+                                      ? "bg-emerald-500/8 text-emerald-400"
+                                      : testStatus === "invalid"
+                                        ? "bg-red-500/8 text-red-400"
+                                        : "bg-bot-surface/40 text-bot-muted/60"
+                                  }`}
+                                >
+                                  {testStatus === "valid" ? (
+                                    <CheckCircle2 className="w-3 h-3 shrink-0" />
+                                  ) : testStatus === "invalid" ? (
+                                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                                  ) : (
+                                    <Loader2 className="w-3 h-3 shrink-0 animate-spin" />
+                                  )}
+                                  <span>{testMsg}</span>
+                                </div>
+                              )}
+                            </div>
                             <div className="flex items-center justify-between">
                               <a
                                 href={provider.apiKeyUrl}
