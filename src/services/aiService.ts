@@ -443,79 +443,49 @@ export async function testApiKey(
   try {
     let response: Response;
 
+    // Usamos endpoints GET de listado de modelos para validar la key
+    // sin consumir tokens ni activar rate limits
     switch (provider) {
       case "anthropic":
-        response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
+        // GET /v1/models — solo lista modelos, cero tokens
+        response = await fetch("https://api.anthropic.com/v1/models?limit=1", {
+          method: "GET",
           headers: {
-            "Content-Type": "application/json",
             "x-api-key": apiKey.trim(),
             "anthropic-version": "2023-06-01",
           },
-          body: JSON.stringify({
-            model: "claude-3-5-haiku-20241022",
-            max_tokens: 10,
-            messages: [{ role: "user", content: "Say hi" }],
-          }),
         });
         break;
 
       case "google":
+        // GET /v1beta/models — solo lista modelos, cero tokens
         response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey.trim()}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text: "Say hi" }] }],
-              generationConfig: { maxOutputTokens: 10 },
-            }),
-          },
+          `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}&pageSize=1`,
+          { method: "GET" },
         );
         break;
 
       case "openai":
-        response = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey.trim()}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            max_tokens: 10,
-            messages: [{ role: "user", content: "Say hi" }],
-          }),
+        // GET /v1/models — solo lista modelos, cero tokens
+        response = await fetch("https://api.openai.com/v1/models", {
+          method: "GET",
+          headers: { "Authorization": `Bearer ${apiKey.trim()}` },
         });
         break;
 
       case "xai":
-        response = await fetch("https://api.x.ai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey.trim()}`,
-          },
-          body: JSON.stringify({
-            model: "grok-3-mini",
-            max_tokens: 10,
-            messages: [{ role: "user", content: "Say hi" }],
-          }),
+        // GET /v1/models — compatible con OpenAI, cero tokens
+        response = await fetch("https://api.x.ai/v1/models", {
+          method: "GET",
+          headers: { "Authorization": `Bearer ${apiKey.trim()}` },
         });
         break;
 
       case "deepseek":
-        response = await fetch("https://api.deepseek.com/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey.trim()}`,
-          },
-          body: JSON.stringify({
-            model: "deepseek-chat",
-            max_tokens: 10,
-            messages: [{ role: "user", content: "Say hi" }],
-          }),
+        // GET /models — compatible con OpenAI, cero tokens
+        response = await fetch("https://api.deepseek.com/models", {
+          method: "GET",
+          headers: { "Authorization": `Bearer ${apiKey.trim()}` },
         });
         break;
     }
@@ -549,11 +519,11 @@ export async function testApiKey(
     }
 
     if (response.status === 429) {
-      // Rate limited but key IS valid
+      // Rate limited pero la key SÍ es válida (el servidor la reconoció)
       return {
         valid: true,
         provider,
-        message: `✅ API key válida (rate limited, ${latencyMs}ms)`,
+        message: `✅ API key válida (${latencyMs}ms)`,
         latencyMs,
       };
     }
