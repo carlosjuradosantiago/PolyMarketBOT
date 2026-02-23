@@ -80,8 +80,8 @@ export const AI_PROVIDERS: AIProviderDef[] = [
     apiKeyPrefix: "AIzaSy...",
     webSearchMethod: "Google Search grounding",
     models: [
-      { id: "gemini-2.0-flash",  name: "Gemini 2.0 Flash",  provider: "google", tag: "Free Tier",    inputPrice: 0.10, outputPrice: 0.40, hasWebSearch: true, contextWindow: 1000000, maxOutput: 8192, freeTier: { dailyRequests: 1500, requestsPerMinute: 15, description: "1,500 req/día, 15 RPM" } },
-      { id: "gemini-2.5-flash",  name: "Gemini 2.5 Flash",  provider: "google", tag: "⭐ Mejor Free", inputPrice: 0.15, outputPrice: 0.60, hasWebSearch: true, contextWindow: 1000000, maxOutput: 65536, freeTier: { dailyRequests: 500, tokensPerMinute: 250_000, requestsPerMinute: 10, minIntervalMs: 10_000, description: "500 req/día, 10 RPM, 250k TPM" }, note: "Thinking tokens: $3.50/M output" },
+      { id: "gemini-2.0-flash",  name: "Gemini 2.0 Flash",  provider: "google", tag: "Free Tier",    inputPrice: 0.10, outputPrice: 0.40, hasWebSearch: true, contextWindow: 1000000, maxOutput: 8192, freeTier: { dailyRequests: 1500, description: "1,500 req/día gratis" } },
+      { id: "gemini-2.5-flash",  name: "Gemini 2.5 Flash",  provider: "google", tag: "⭐ Mejor Free", inputPrice: 0.15, outputPrice: 0.60, hasWebSearch: true, contextWindow: 1000000, maxOutput: 65536, freeTier: { dailyRequests: 20, tokensPerMinute: 250_000, requestsPerMinute: 5, minIntervalMs: 15_000, description: "20 req/día, 5 RPM, 250k TPM" }, note: "Thinking tokens: $3.50/M output" },
       { id: "gemini-2.5-pro",    name: "Gemini 2.5 Pro",    provider: "google", tag: "Pro",          inputPrice: 1.25, outputPrice: 10,   hasWebSearch: true, contextWindow: 1000000, maxOutput: 65536, freeTier: { dailyRequests: 25, requestsPerMinute: 5, minIntervalMs: 15_000, description: "25 req/día, 5 RPM" }, note: ">200K ctx: $2.50/$15 per M" },
     ],
   },

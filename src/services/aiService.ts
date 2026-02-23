@@ -441,74 +441,88 @@ export async function testApiKey(
   const start = Date.now();
 
   try {
-    let response: Response;
+    // Enviamos petición mínima a través de nuestro proxy Supabase (tiene CORS).
+    // Usamos "hi" con max_tokens=1 para consumo prácticamente cero.
+    const proxyUrl = getProxyUrl(provider, SUPABASE_URL);
+    let requestBody: Record<string, unknown>;
 
-    // Usamos endpoints GET de listado de modelos para validar la key
-    // sin consumir tokens ni activar rate limits
     switch (provider) {
       case "anthropic":
-        // GET /v1/models — solo lista modelos, cero tokens
-        response = await fetch("https://api.anthropic.com/v1/models?limit=1", {
-          method: "GET",
-          headers: {
-            "x-api-key": apiKey.trim(),
-            "anthropic-version": "2023-06-01",
-          },
-        });
+        requestBody = {
+          apiKey: apiKey.trim(),
+          model: "claude-3-5-haiku-20241022",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        };
         break;
 
       case "google":
-        // GET /v1beta/models — solo lista modelos, cero tokens
-        response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}&pageSize=1`,
-          { method: "GET" },
-        );
+        requestBody = {
+          apiKey: apiKey.trim(),
+          model: "gemini-2.0-flash",
+          contents: [{ role: "user", parts: [{ text: "hi" }] }],
+          generationConfig: { maxOutputTokens: 1 },
+        };
         break;
 
       case "openai":
-        // GET /v1/models — solo lista modelos, cero tokens
-        response = await fetch("https://api.openai.com/v1/models", {
-          method: "GET",
-          headers: { "Authorization": `Bearer ${apiKey.trim()}` },
-        });
+        requestBody = {
+          apiKey: apiKey.trim(),
+          model: "gpt-4o-mini",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        };
         break;
 
       case "xai":
-        // GET /v1/models — compatible con OpenAI, cero tokens
-        response = await fetch("https://api.x.ai/v1/models", {
-          method: "GET",
-          headers: { "Authorization": `Bearer ${apiKey.trim()}` },
-        });
+        requestBody = {
+          apiKey: apiKey.trim(),
+          model: "grok-3-mini",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        };
         break;
 
       case "deepseek":
-        // GET /models — compatible con OpenAI, cero tokens
-        response = await fetch("https://api.deepseek.com/models", {
-          method: "GET",
-          headers: { "Authorization": `Bearer ${apiKey.trim()}` },
-        });
+        requestBody = {
+          apiKey: apiKey.trim(),
+          model: "deepseek-chat",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        };
         break;
     }
 
+    const response = await fetch(proxyUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "apikey": SUPABASE_KEY,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
     const latencyMs = Date.now() - start;
+    const data = await response.json().catch(() => ({}));
 
     if (response.ok) {
       return {
         valid: true,
         provider,
-        message: `✅ API key válida (${latencyMs}ms)`,
+        message: `API key válida (${latencyMs}ms)`,
         latencyMs,
       };
     }
 
-    // Parse error
-    const errorData = await response.json().catch(() => ({}));
+    // Extract error message from response
     const errorMsg =
-      errorData?.error?.message ||
-      errorData?.error?.type ||
+      data?.error?.message ||
+      data?.error?.type ||
+      data?.error ||
       `HTTP ${response.status}`;
 
-    // Common error patterns
+    // 401/403 = key inválida
     if (response.status === 401 || response.status === 403) {
       return {
         valid: false,
@@ -518,12 +532,12 @@ export async function testApiKey(
       };
     }
 
+    // 429 = rate limited pero key SÍ es válida
     if (response.status === 429) {
-      // Rate limited pero la key SÍ es válida (el servidor la reconoció)
       return {
         valid: true,
         provider,
-        message: `✅ API key válida (${latencyMs}ms)`,
+        message: `API key válida (${latencyMs}ms)`,
         latencyMs,
       };
     }
@@ -531,7 +545,7 @@ export async function testApiKey(
     return {
       valid: false,
       provider,
-      message: `Error ${response.status}: ${errorMsg}`,
+      message: `Error ${response.status}: ${typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg)}`,
       latencyMs,
     };
   } catch (err) {
