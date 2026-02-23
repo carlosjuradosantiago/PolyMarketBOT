@@ -99,7 +99,7 @@ export interface PerformanceHistory {
   winRate: number;
 }
 
-function buildOSINTPrompt(
+export function buildOSINTPrompt(
   shortTermMarkets: PolymarketMarket[],
   openOrders: PaperOrder[],
   bankroll: number,
@@ -332,7 +332,7 @@ export interface ClaudeResearchResult {
 // ─── Robust JSON extractor ──────────────────────────
 // Claude sometimes adds reasoning text before/after JSON output.
 // This function tries multiple strategies to extract valid JSON.
-function extractJSON(raw: string): string {
+export function extractJSON(raw: string): string {
   const trimmed = raw.trim();
 
   // Strategy 1: Already valid JSON

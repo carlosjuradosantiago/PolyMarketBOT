@@ -12,9 +12,25 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const CLAUDE_API_KEY = Deno.env.get("CLAUDE_API_KEY")!;
+const CLAUDE_API_KEY = Deno.env.get("CLAUDE_API_KEY") || "";
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
+const XAI_API_KEY = Deno.env.get("XAI_API_KEY") || "";
+const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") || "";
 const GAMMA_API = "https://gamma-api.polymarket.com";
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
+
+type AIProviderType = "anthropic" | "google" | "openai" | "xai" | "deepseek";
+
+function getProviderApiKey(provider: AIProviderType): string {
+  switch (provider) {
+    case "anthropic": return CLAUDE_API_KEY;
+    case "google": return GEMINI_API_KEY;
+    case "openai": return OPENAI_API_KEY;
+    case "xai": return XAI_API_KEY;
+    case "deepseek": return DEEPSEEK_API_KEY;
+  }
+}
 
 // ─── Supabase Client (service role — full access) ────
 
@@ -65,12 +81,31 @@ const PRICE_CEILING = 0.95;
 
 // Model pricing ($ per 1M tokens)
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  // Anthropic
   "claude-opus-4-6":               { input: 5,    output: 25 },
   "claude-opus-4-5":               { input: 5,    output: 25 },
   "claude-sonnet-4-5":             { input: 3,    output: 15 },
   "claude-sonnet-4-20250514":      { input: 3,    output: 15 },
   "claude-haiku-4-5":              { input: 1,    output: 5 },
   "claude-3-5-haiku-20241022":     { input: 0.80, output: 4 },
+  // Google Gemini
+  "gemini-2.5-pro":                { input: 1.25, output: 10 },
+  "gemini-2.5-flash":              { input: 0.15, output: 0.60 },
+  "gemini-2.0-flash":              { input: 0.10, output: 0.40 },
+  "gemini-2.0-flash-lite":         { input: 0.075, output: 0.30 },
+  // OpenAI
+  "gpt-4.1":                       { input: 2,    output: 8 },
+  "gpt-4.1-mini":                  { input: 0.40, output: 1.60 },
+  "gpt-4.1-nano":                  { input: 0.10, output: 0.40 },
+  "o3":                            { input: 2,    output: 8 },
+  "o4-mini":                       { input: 1.10, output: 4.40 },
+  // xAI
+  "grok-3":                        { input: 3,    output: 15 },
+  "grok-3-mini":                   { input: 0.30, output: 0.50 },
+  // DeepSeek
+  "deepseek-chat":                 { input: 0.27, output: 1.10 },
+  "deepseek-reasoner":             { input: 0.55, output: 2.19 },
+  // Default
   "default":                       { input: 3,    output: 15 },
 };
 
@@ -1160,6 +1195,163 @@ async function callClaudeAPI(
   };
 }
 
+// ─── Multi-Provider AI Router ────────────────────────
+
+async function callAI(
+  provider: AIProviderType,
+  model: string,
+  batch: PolymarketMarket[],
+  openOrders: PaperOrder[],
+  bankroll: number,
+  history?: { totalTrades: number; wins: number; losses: number; totalPnl: number; winRate: number },
+) {
+  // For Anthropic, use the existing battle-tested function
+  if (provider === "anthropic") {
+    return callClaudeAPI(batch, openOrders, bankroll, model, history);
+  }
+  return callGenericProviderAPI(provider, model, batch, openOrders, bankroll, history);
+}
+
+async function callGenericProviderAPI(
+  provider: AIProviderType,
+  model: string,
+  batch: PolymarketMarket[],
+  openOrders: PaperOrder[],
+  bankroll: number,
+  history?: { totalTrades: number; wins: number; losses: number; totalPnl: number; winRate: number },
+) {
+  if (batch.length === 0) {
+    return { analyses: [] as MarketAnalysis[], skipped: [] as SkippedMarket[], usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, model }, summary: "Empty batch", prompt: "", rawResponse: "", responseTimeMs: 0, webSearches: 0, searchQueries: [] as string[] };
+  }
+
+  const apiKey = getProviderApiKey(provider);
+  if (!apiKey) throw new Error(`API key no configurada para ${provider}`);
+
+  let prompt = buildOSINTPrompt(batch, openOrders, bankroll, history);
+
+  // Providers without web search get a note
+  const noWeb = provider === "deepseek";
+  if (noWeb) {
+    prompt = "NOTA: Sin acceso a búsqueda web. Usa datos de entrenamiento.\n\n" + prompt;
+  }
+
+  const startTime = Date.now();
+  let responseData: any;
+
+  if (provider === "google") {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      tools: [{ google_search: {} }],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 16384 },
+    })});
+    if (!res.ok) throw new Error(`Gemini API HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    responseData = await res.json();
+  } else {
+    // OpenAI-compatible (openai, xai, deepseek)
+    const urls: Record<string, string> = { openai: "https://api.openai.com/v1/chat/completions", xai: "https://api.x.ai/v1/chat/completions", deepseek: "https://api.deepseek.com/chat/completions" };
+    const body: any = { model, messages: [{ role: "user", content: prompt }], temperature: 0.3, max_tokens: 16384 };
+    if (provider === "openai") body.tools = [{ type: "web_search_preview", search_context_size: "medium" }];
+    if (provider === "xai") body.search = { mode: "auto" };
+    const res = await fetch(urls[provider], { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`${provider} API HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    responseData = await res.json();
+  }
+
+  const elapsed = Date.now() - startTime;
+
+  // Parse tokens and content per provider
+  let content = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let webSearches = 0;
+  let searchQueries: string[] = [];
+
+  if (provider === "google") {
+    const parts = responseData.candidates?.[0]?.content?.parts || [];
+    content = parts.map((p: any) => p.text || "").join("\n");
+    inputTokens = responseData.usageMetadata?.promptTokenCount || 0;
+    outputTokens = responseData.usageMetadata?.candidatesTokenCount || 0;
+    searchQueries = responseData.candidates?.[0]?.groundingMetadata?.webSearchQueries || [];
+    webSearches = searchQueries.length;
+  } else {
+    content = responseData.choices?.[0]?.message?.content || "";
+    inputTokens = responseData.usage?.prompt_tokens || 0;
+    outputTokens = responseData.usage?.completion_tokens || 0;
+  }
+
+  const costUsd = calculateTokenCost(inputTokens, outputTokens, model);
+  log(`✅ [${provider}/${model}] ${elapsed}ms, ${inputTokens}↓/${outputTokens}↑, $${costUsd.toFixed(4)}`);
+
+  // Parse analysis JSON (reuse same logic as Claude)
+  let analyses: MarketAnalysis[] = [];
+  let skippedMarkets: SkippedMarket[] = [];
+  let summary = "";
+
+  try {
+    const jsonStr = extractJSON(content);
+    const parsed = JSON.parse(jsonStr);
+    summary = parsed.summary || "";
+    if (Array.isArray(parsed.skipped)) {
+      skippedMarkets = parsed.skipped.map((s: any) => ({ marketId: s.marketId || "", question: s.question || "", reason: s.reason || "Sin razón" }));
+    }
+    if (Array.isArray(parsed.recommendations)) {
+      analyses = parsed.recommendations
+        .filter((item: any) => item.recommendedSide && item.recommendedSide.toUpperCase() !== "SKIP")
+        .map((item: any) => {
+          let side = (item.recommendedSide || "SKIP").toUpperCase();
+          let pReal = parseFloat(item.pReal) || 0;
+          const pMarket = parseFloat(item.pMarket) || 0;
+          let pLow = parseFloat(item.pLow) || 0;
+          let pHigh = parseFloat(item.pHigh) || 0;
+          if (side === "NO" && pReal > 0.50) { pReal = 1 - pReal; const oL = pLow; pLow = 1 - pHigh; pHigh = 1 - oL; }
+          if (pMarket > 0.01 && pMarket < 0.99) {
+            if (side === "YES" && pReal < pMarket) side = "NO";
+            else if (side === "NO" && pReal > pMarket) side = "YES";
+          }
+          return {
+            marketId: item.marketId || "", question: item.question || "",
+            pMarket, pReal, pLow, pHigh, edge: Math.abs(pReal - pMarket),
+            confidence: parseInt(item.confidence) || 0, recommendedSide: side,
+            reasoning: item.reasoning || "", sources: item.sources || [],
+            evNet: parseFloat(item.evNet) || undefined,
+            maxEntryPrice: parseFloat(item.maxEntryPrice) || undefined,
+            sizeUsd: parseFloat(item.sizeUsd) || undefined,
+            orderType: item.orderType || undefined,
+            clusterId: item.clusterId || null, risks: item.risks || "",
+            resolutionCriteria: item.resolutionCriteria || "",
+            category: item.category || undefined,
+          };
+        });
+    }
+    analyses = analyses.filter(a => {
+      if (a.edge > MAX_ENRICHED_EDGE) { log(`🚫 EDGE GUARD: Rejected "${a.question}" — edge ${(a.edge * 100).toFixed(1)}%`); return false; }
+      return true;
+    });
+  } catch (parseError) {
+    log(`⚠️ Error parsing ${provider} response:`, parseError);
+  }
+
+  return { analyses, skipped: skippedMarkets, usage: { inputTokens, outputTokens, costUsd, model }, summary, prompt, rawResponse: content, responseTimeMs: elapsed, webSearches, searchQueries };
+}
+
+// ─── Provider Config (from bot_kv) ───────────────────
+
+async function getAIProviderConfig(): Promise<{ provider: AIProviderType; model: string }> {
+  try {
+    const { data } = await supabase.from("bot_kv").select("key, value").in("key", ["ai_provider", "ai_model"]);
+    let provider: AIProviderType = "anthropic";
+    let model = DEFAULT_MODEL;
+    for (const row of data || []) {
+      if (row.key === "ai_provider") provider = row.value as AIProviderType;
+      if (row.key === "ai_model") model = row.value;
+    }
+    return { provider, model };
+  } catch {
+    return { provider: "anthropic", model: DEFAULT_MODEL };
+  }
+}
+
 // ─── Kelly Criterion ─────────────────────────────────
 
 function rawKellyFraction(pReal: number, pMarket: number): number {
@@ -1344,9 +1536,12 @@ Deno.serve(async (req) => {
     log(`UTC: ${new Date().toISOString()}`);
 
     // ─── Validate env ────────────────────────────
-    if (!CLAUDE_API_KEY) {
-      throw new Error("CLAUDE_API_KEY not configured in Edge Function secrets");
+    const aiConfig = await getAIProviderConfig();
+    const activeApiKey = getProviderApiKey(aiConfig.provider);
+    if (!activeApiKey) {
+      throw new Error(`API key for ${aiConfig.provider} not configured in Edge Function secrets`);
     }
+    log(`🤖 Proveedor: ${aiConfig.provider}, Modelo: ${aiConfig.model}`);
 
     // ─── Cycle Lock ──────────────────────────────
     if (await checkCycleLock()) {
@@ -1521,11 +1716,11 @@ Deno.serve(async (req) => {
         const batch = batches[batchIdx];
         const batchLabel = `Batch ${batchIdx + 1}/${batches.length}`;
         log(`\n═══ ${batchLabel}: ${batch.length} markets ═══`);
-        act(`📡 ${batchLabel}: Enviando ${batch.length} mercados a Claude...`, "Inference");
+        act(`📡 ${batchLabel}: Enviando ${batch.length} mercados a ${aiConfig.provider}...`, "Inference");
 
         let aiResult;
         try {
-          aiResult = await callClaudeAPI(batch, updatedPortfolio.openOrders, updatedPortfolio.balance, DEFAULT_MODEL, perfHistory);
+          aiResult = await callAI(aiConfig.provider, aiConfig.model, batch, updatedPortfolio.openOrders, updatedPortfolio.balance, perfHistory);
           totalAICostCycle += aiResult.usage.costUsd;
 
           if (batchIdx === 0) {

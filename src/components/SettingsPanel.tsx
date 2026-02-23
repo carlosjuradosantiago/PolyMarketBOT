@@ -1,7 +1,11 @@
-import { useState } from "react";
-import { X, Key, Bot, Sliders, Shield, Save, Eye, EyeOff } from "lucide-react";
-import { BotConfig, defaultConfig } from "../types";
-import { CLAUDE_MODELS } from "../services/claudeAI";
+import { useState, useMemo } from "react";
+import {
+  X, Key, Bot, Sliders, Shield, Save, Eye, EyeOff,
+  ExternalLink, Check, Search, Zap, Globe, AlertTriangle,
+} from "lucide-react";
+import { BotConfig } from "../types";
+import type { AIProviderType, AIModelDef, AIProviderDef } from "../services/aiProviders";
+import { AI_PROVIDERS, getProvider, estimateCycleCost } from "../services/aiProviders";
 import { useTranslation } from "../i18n";
 
 interface SettingsPanelProps {
@@ -18,6 +22,7 @@ export default function SettingsPanel({
   const [form, setForm] = useState<BotConfig>({ ...config });
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<"keys" | "trading" | "ai">("keys");
+  const [expandedProvider, setExpandedProvider] = useState<AIProviderType | null>(null);
   const { t } = useTranslation();
 
   const toggleShow = (field: string) => {
@@ -28,19 +33,65 @@ export default function SettingsPanel({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const updateApiKey = (provider: AIProviderType, key: string) => {
+    setForm((prev) => ({
+      ...prev,
+      ai_api_keys: { ...prev.ai_api_keys, [provider]: key },
+      // Keep legacy field in sync
+      ...(provider === "anthropic" ? { claude_api_key: key } : {}),
+    }));
+  };
+
+  const selectProvider = (provider: AIProviderType) => {
+    const providerDef = getProvider(provider);
+    const firstModel = providerDef.models[0];
+    setForm((prev) => ({
+      ...prev,
+      ai_provider: provider,
+      ai_model: firstModel?.id || prev.ai_model,
+      // Keep legacy field in sync
+      ...(provider === "anthropic" ? { claude_model: firstModel?.id || prev.claude_model } : {}),
+    }));
+  };
+
+  const selectModel = (modelId: string) => {
+    setForm((prev) => ({
+      ...prev,
+      ai_model: modelId,
+      // Keep legacy field in sync
+      ...(prev.ai_provider === "anthropic" ? { claude_model: modelId } : {}),
+    }));
+  };
+
   const handleSave = () => {
     onSave(form);
   };
 
+  // Active provider definition
+  const activeProviderDef = useMemo(
+    () => getProvider(form.ai_provider || "anthropic"),
+    [form.ai_provider],
+  );
+
+  // Count configured API keys
+  const configuredKeys = useMemo(() => {
+    return AI_PROVIDERS.filter((p) => {
+      const key =
+        form.ai_api_keys?.[p.id] ||
+        (p.id === "anthropic" ? form.claude_api_key : "");
+      return key && key.length > 5;
+    }).length;
+  }, [form.ai_api_keys, form.claude_api_key]);
+
   const tabs = [
-    { id: "keys" as const, label: t("settings.tabKeys"), icon: Key },
-    { id: "trading" as const, label: t("settings.tabTrading"), icon: Sliders },
-    { id: "ai" as const, label: t("settings.tabAI"), icon: Bot },
+    { id: "keys" as const, label: t("settings.tabKeys"), icon: Key, badge: `${configuredKeys}/5` },
+    { id: "trading" as const, label: t("settings.tabTrading"), icon: Sliders, badge: undefined },
+    { id: "ai" as const, label: t("settings.tabAI"), icon: Bot, badge: undefined },
   ];
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50">
-      <div className="glass-card rounded-2xl w-[600px] max-h-[80vh] flex flex-col shadow-card-hover border border-bot-border/30">
+      <div className="glass-card rounded-2xl w-[680px] max-h-[85vh] flex flex-col shadow-card-hover border border-bot-border/30">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-bot-border/20">
           <div className="flex items-center gap-2">
@@ -71,14 +122,23 @@ export default function SettingsPanel({
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
+              {tab.badge && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bot-surface/60 text-bot-muted/60">
+                  {tab.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 custom-scrollbar">
+          {/* ═══════════════════════════════════════════════ */}
+          {/* TAB: API KEYS                                  */}
+          {/* ═══════════════════════════════════════════════ */}
           {activeTab === "keys" && (
             <>
+              {/* Polymarket CLOB Section */}
               <SectionTitle
                 title={t("settings.polymarketCLOB")}
                 subtitle={t("settings.polymarketSubtitle")}
@@ -108,23 +168,142 @@ export default function SettingsPanel({
                 placeholder={t("settings.passphrasePlaceholder")}
               />
 
+              {/* AI Providers Section */}
               <div className="border-t border-bot-border/20 pt-5">
                 <SectionTitle
-                  title={t("settings.claudeAI")}
-                  subtitle={t("settings.claudeSubtitle")}
+                  title="Proveedores de IA"
+                  subtitle="Configura las API keys de cada proveedor de inteligencia artificial"
                 />
-                <SecretInput
-                  label={t("settings.claudeApiKey")}
-                  value={form.claude_api_key}
-                  onChange={(v) => updateField("claude_api_key", v)}
-                  show={showKeys["claude_key"]}
-                  onToggle={() => toggleShow("claude_key")}
-                  placeholder={t("settings.claudeApiKeyPlaceholder")}
-                />
+                <div className="space-y-2 mt-3">
+                  {AI_PROVIDERS.map((provider) => {
+                    const apiKey =
+                      form.ai_api_keys?.[provider.id] ||
+                      (provider.id === "anthropic" ? form.claude_api_key : "") ||
+                      "";
+                    const isConfigured = apiKey.length > 5;
+                    const isExpanded = expandedProvider === provider.id;
+                    const isActive = form.ai_provider === provider.id;
+
+                    return (
+                      <div
+                        key={provider.id}
+                        className={`rounded-xl border transition-all duration-200 overflow-hidden ${
+                          isActive
+                            ? "border-bot-cyan/40 bg-bot-cyan/5"
+                            : isExpanded
+                              ? "border-bot-border/40 bg-bot-surface/40"
+                              : "border-bot-border/20 bg-bot-surface/20 hover:border-bot-border/40"
+                        }`}
+                      >
+                        {/* Provider Header (clickable) */}
+                        <button
+                          onClick={() =>
+                            setExpandedProvider(isExpanded ? null : provider.id)
+                          }
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                        >
+                          {/* Provider Icon with brand color */}
+                          <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
+                            style={{
+                              background: `${provider.color}15`,
+                              color: provider.color,
+                              border: `1px solid ${provider.color}30`,
+                            }}
+                          >
+                            {provider.icon}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-display font-semibold text-white">
+                                {provider.name}
+                              </span>
+                              {isActive && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-bot-cyan/15 text-bot-cyan font-display font-bold uppercase tracking-wider">
+                                  Activo
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-bot-muted/40">
+                              {provider.models.length} modelos •{" "}
+                              {provider.webSearchMethod}
+                            </div>
+                          </div>
+
+                          {/* Status indicator */}
+                          <div
+                            className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                              isConfigured
+                                ? "bg-emerald-500/15 text-emerald-400"
+                                : "bg-bot-surface/40 text-bot-muted/30"
+                            }`}
+                          >
+                            {isConfigured ? (
+                              <Check className="w-3.5 h-3.5" />
+                            ) : (
+                              <Key className="w-3.5 h-3.5" />
+                            )}
+                          </div>
+
+                          {/* Expand arrow */}
+                          <svg
+                            className={`w-4 h-4 text-bot-muted/40 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 9l-7 7-7-7"
+                            />
+                          </svg>
+                        </button>
+
+                        {/* Expanded Content */}
+                        {isExpanded && (
+                          <div className="px-4 pb-4 pt-1 border-t border-bot-border/10 space-y-3">
+                            <SecretInput
+                              label={`${provider.name} API Key`}
+                              value={apiKey}
+                              onChange={(v) => updateApiKey(provider.id, v)}
+                              show={showKeys[`ai_${provider.id}`]}
+                              onToggle={() => toggleShow(`ai_${provider.id}`)}
+                              placeholder={provider.apiKeyPrefix}
+                            />
+                            <div className="flex items-center justify-between">
+                              <a
+                                href={provider.apiKeyUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-[11px] hover:underline transition-colors"
+                                style={{ color: provider.color }}
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                Obtener API Key en {provider.website}
+                              </a>
+                              {/* Free tier indicator for Google */}
+                              {provider.id === "google" && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-display">
+                                  🎁 Incluye free tier
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </>
           )}
 
+          {/* ═══════════════════════════════════════════════ */}
+          {/* TAB: TRADING                                   */}
+          {/* ═══════════════════════════════════════════════ */}
           {activeTab === "trading" && (
             <>
               <SectionTitle
@@ -179,7 +358,10 @@ export default function SettingsPanel({
                     {t("settings.searchWindow")}
                   </label>
                   <span className="text-xs text-bot-cyan font-mono">
-                    {form.max_expiry_hours}h{form.max_expiry_hours >= 24 ? ` (${(form.max_expiry_hours / 24).toFixed(form.max_expiry_hours % 24 === 0 ? 0 : 1)} días)` : ""}
+                    {form.max_expiry_hours}h
+                    {form.max_expiry_hours >= 24
+                      ? ` (${(form.max_expiry_hours / 24).toFixed(form.max_expiry_hours % 24 === 0 ? 0 : 1)} días)`
+                      : ""}
                   </span>
                 </div>
                 <input
@@ -188,7 +370,9 @@ export default function SettingsPanel({
                   max={168}
                   step={1}
                   value={form.max_expiry_hours}
-                  onChange={(e) => updateField("max_expiry_hours", parseFloat(e.target.value))}
+                  onChange={(e) =>
+                    updateField("max_expiry_hours", parseFloat(e.target.value))
+                  }
                   className="w-full h-1.5 bg-bot-border rounded-full appearance-none cursor-pointer accent-bot-cyan"
                 />
                 <div className="flex justify-between text-[10px] text-bot-muted/30">
@@ -229,7 +413,8 @@ export default function SettingsPanel({
               <div className="flex items-center justify-between border-t border-bot-border/20 pt-4 mt-4">
                 <div>
                   <div className="text-sm text-white font-display flex items-center gap-2">
-                    <span className="text-amber-400">⚠️</span> {t("settings.paperTrading")}
+                    <span className="text-amber-400">⚠️</span>{" "}
+                    {t("settings.paperTrading")}
                   </div>
                   <div className="text-xs text-bot-muted/50">
                     {t("settings.paperTradingDesc")}
@@ -242,58 +427,111 @@ export default function SettingsPanel({
             </>
           )}
 
+          {/* ═══════════════════════════════════════════════ */}
+          {/* TAB: AI CONFIG                                 */}
+          {/* ═══════════════════════════════════════════════ */}
           {activeTab === "ai" && (
             <>
               <SectionTitle
-                title={t("settings.aiConfig")}
-                subtitle={t("settings.aiConfigSubtitle")}
+                title="Configuración de IA"
+                subtitle="Selecciona el proveedor y modelo para análisis de mercados"
               />
+
+              {/* Provider Selector — horizontal strip */}
+              <div className="flex gap-2 flex-wrap">
+                {AI_PROVIDERS.map((provider) => {
+                  const isSelected = form.ai_provider === provider.id;
+                  const hasKey = !!(
+                    form.ai_api_keys?.[provider.id] ||
+                    (provider.id === "anthropic" ? form.claude_api_key : "")
+                  );
+                  return (
+                    <button
+                      key={provider.id}
+                      onClick={() => selectProvider(provider.id)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all duration-200 ${
+                        isSelected
+                          ? "border-bot-cyan/50 bg-bot-cyan/10 ring-1 ring-bot-cyan/20 shadow-sm shadow-bot-cyan/10"
+                          : hasKey
+                            ? "border-bot-border/30 bg-bot-surface/40 hover:border-bot-border/50"
+                            : "border-bot-border/20 bg-bot-surface/20 opacity-60 hover:opacity-80"
+                      }`}
+                    >
+                      <span
+                        className="text-sm font-bold"
+                        style={{ color: isSelected ? provider.color : undefined }}
+                      >
+                        {provider.icon}
+                      </span>
+                      <span
+                        className={`font-display font-medium ${isSelected ? "text-white" : "text-bot-muted/70"}`}
+                      >
+                        {provider.name}
+                      </span>
+                      {!hasKey && (
+                        <AlertTriangle className="w-3 h-3 text-amber-400/60" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Warning if no API key for selected provider */}
+              {!(
+                form.ai_api_keys?.[form.ai_provider] ||
+                (form.ai_provider === "anthropic" ? form.claude_api_key : "")
+              ) && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>
+                    No hay API key configurada para{" "}
+                    <strong>{activeProviderDef.name}</strong>.{" "}
+                    <button
+                      onClick={() => {
+                        setActiveTab("keys");
+                        setExpandedProvider(form.ai_provider);
+                      }}
+                      className="underline hover:text-amber-200 transition-colors"
+                    >
+                      Configurar ahora →
+                    </button>
+                  </span>
+                </div>
+              )}
+
+              {/* Provider Info Bar */}
+              <div className="flex items-center gap-4 px-3 py-2 rounded-lg bg-bot-surface/30 border border-bot-border/15">
+                <div className="flex items-center gap-1.5 text-[11px] text-bot-muted/50">
+                  <Globe className="w-3 h-3" />
+                  <span>{activeProviderDef.webSearchMethod}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-bot-muted/50">
+                  <Zap className="w-3 h-3" />
+                  <span>{activeProviderDef.models.length} modelos</span>
+                </div>
+                {activeProviderDef.models.some((m) => m.freeTier) && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/70">
+                    <span>🎁</span>
+                    <span>Free tier disponible</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Model Selection */}
               <div className="space-y-2">
                 <label className="text-xs text-bot-muted/50 uppercase tracking-wider font-display">
-                  {t("settings.claudeModel")}
+                  Seleccionar Modelo
                 </label>
                 <div className="space-y-2">
-                  {CLAUDE_MODELS.map((m) => {
-                    const selected = form.claude_model === m.id;
-                    return (
-                      <button
-                        key={m.id}
-                        onClick={() => updateField("claude_model", m.id)}
-                        className={`w-full text-left px-4 py-3 rounded-lg border transition-all ${
-                          selected
-                            ? "bg-bot-cyan/10 border-bot-cyan/40 ring-1 ring-bot-cyan/20"
-                            : "bg-bot-surface/40 border-bot-border/30 hover:border-bot-cyan/20 hover:bg-bot-surface/60"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-3 h-3 rounded-full border-2 ${
-                              selected ? "border-bot-cyan bg-bot-cyan" : "border-gray-600"
-                            }`} />
-                            <span className={`text-sm font-display font-semibold ${selected ? "text-bot-cyan" : "text-white"}`}>
-                              {m.name}
-                            </span>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-display font-medium ${
-                              selected ? "bg-bot-cyan/15 text-bot-cyan" : "bg-bot-surface/60 text-bot-muted/40"
-                            }`}>
-                              {m.tag}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4 mt-1 ml-5">
-                          <span className="text-[11px] text-bot-muted/40">
-                            {t("settings.input")} <span className="text-amber-400/80 font-mono">${m.inputPrice}/M</span>
-                          </span>
-                          <span className="text-[11px] text-bot-muted/40">
-                            {t("settings.output")} <span className="text-amber-400/80 font-mono">${m.outputPrice}/M</span>
-                          </span>
-                          <span className="text-[11px] text-bot-muted/40">
-                            ~<span className="text-bot-green/80 font-mono">${((m.inputPrice * 1500 + m.outputPrice * 800) / 1_000_000).toFixed(4)}</span>{t("settings.perCycle")}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                  {activeProviderDef.models.map((model) => (
+                    <ModelCard
+                      key={model.id}
+                      model={model}
+                      provider={activeProviderDef}
+                      isSelected={form.ai_model === model.id}
+                      onSelect={() => selectModel(model.id)}
+                    />
+                  ))}
                 </div>
               </div>
             </>
@@ -301,22 +539,168 @@ export default function SettingsPanel({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-bot-border/20">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-bot-muted/50 hover:text-white transition-colors font-display"
-          >
-            {t("settings.cancel")}
-          </button>
-          <button
-            onClick={handleSave}
-            className="flex items-center gap-2 bg-bot-cyan/15 text-bot-cyan px-5 py-2 rounded-lg text-sm font-display font-semibold hover:bg-bot-cyan/25 border border-bot-cyan/20 transition-colors">
-            <Save className="w-4 h-4" />
-            {t("settings.save")}
-          </button>
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-bot-border/20">
+          {/* Active config summary */}
+          <div className="flex items-center gap-2 text-[11px] text-bot-muted/40">
+            <span
+              className="font-bold"
+              style={{ color: activeProviderDef.color }}
+            >
+              {activeProviderDef.icon}
+            </span>
+            <span className="text-white/70 font-display">
+              {activeProviderDef.models.find((m) => m.id === form.ai_model)
+                ?.name || form.ai_model}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-bot-muted/50 hover:text-white transition-colors font-display"
+            >
+              {t("settings.cancel")}
+            </button>
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-2 bg-bot-cyan/15 text-bot-cyan px-5 py-2 rounded-lg text-sm font-display font-semibold hover:bg-bot-cyan/25 border border-bot-cyan/20 transition-colors"
+            >
+              <Save className="w-4 h-4" />
+              {t("settings.save")}
+            </button>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Model Card Component ─────────────────────────────────
+
+function ModelCard({
+  model,
+  provider,
+  isSelected,
+  onSelect,
+}: {
+  model: AIModelDef;
+  provider: AIProviderDef;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const costPerCycle = estimateCycleCost(model);
+  const isFreeTier = !!model.freeTier;
+
+  return (
+    <button
+      onClick={onSelect}
+      className={`w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${
+        isSelected
+          ? "bg-bot-cyan/8 border-bot-cyan/40 ring-1 ring-bot-cyan/15 shadow-sm shadow-bot-cyan/5"
+          : "bg-bot-surface/30 border-bot-border/25 hover:border-bot-border/40 hover:bg-bot-surface/50"
+      }`}
+    >
+      {/* Row 1: Name + Tags */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {/* Radio indicator */}
+          <div
+            className={`w-3.5 h-3.5 rounded-full border-2 transition-colors shrink-0 ${
+              isSelected
+                ? "border-bot-cyan bg-bot-cyan"
+                : "border-gray-600 bg-transparent"
+            }`}
+          >
+            {isSelected && (
+              <div className="w-full h-full rounded-full flex items-center justify-center">
+                <div className="w-1.5 h-1.5 rounded-full bg-white" />
+              </div>
+            )}
+          </div>
+
+          <span
+            className={`text-sm font-display font-semibold ${isSelected ? "text-white" : "text-white/80"}`}
+          >
+            {model.name}
+          </span>
+
+          {/* Tag */}
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-full font-display font-medium"
+            style={{
+              background: isSelected
+                ? `${provider.color}20`
+                : "rgba(255,255,255,0.05)",
+              color: isSelected ? provider.color : "rgba(255,255,255,0.35)",
+            }}
+          >
+            {model.tag}
+          </span>
+
+          {/* Free tier badge */}
+          {isFreeTier && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-display font-bold">
+              🎁 FREE
+            </span>
+          )}
+
+          {/* Web search indicator */}
+          {model.hasWebSearch ? (
+            <span title="Búsqueda web incluida">
+              <Search className="w-3 h-3 text-blue-400/50" />
+            </span>
+          ) : (
+            <span className="text-[9px] text-red-400/40" title="Sin búsqueda web">
+              ⊘
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Row 2: Pricing + Cost estimate */}
+      <div className="flex items-center gap-4 mt-1.5 ml-6">
+        <span className="text-[11px] text-bot-muted/40">
+          Input:{" "}
+          <span className="text-amber-400/80 font-mono">
+            ${model.inputPrice}/M
+          </span>
+        </span>
+        <span className="text-[11px] text-bot-muted/40">
+          Output:{" "}
+          <span className="text-amber-400/80 font-mono">
+            ${model.outputPrice}/M
+          </span>
+        </span>
+        <span className="text-[11px] text-bot-muted/40">
+          ~
+          <span className="text-bot-green/80 font-mono">
+            ${costPerCycle.toFixed(4)}
+          </span>
+          /ciclo
+        </span>
+        {model.contextWindow >= 1000000 && (
+          <span className="text-[10px] text-purple-400/50">1M ctx</span>
+        )}
+      </div>
+
+      {/* Row 3: Free tier details or notes */}
+      {(isFreeTier || model.note) && (
+        <div className="mt-1.5 ml-6">
+          {isFreeTier && model.freeTier && (
+            <span className="text-[10px] text-emerald-400/60">
+              ✨ {model.freeTier.description}
+            </span>
+          )}
+          {model.note && (
+            <span
+              className={`text-[10px] text-bot-muted/30 italic ${isFreeTier ? "ml-3" : ""}`}
+            >
+              {isFreeTier ? "• " : ""}
+              {model.note}
+            </span>
+          )}
+        </div>
+      )}
+    </button>
   );
 }
 
@@ -331,7 +715,9 @@ function SectionTitle({
 }) {
   return (
     <div className="mb-2">
-      <div className="text-sm font-display font-semibold text-white">{title}</div>
+      <div className="text-sm font-display font-semibold text-white">
+        {title}
+      </div>
       <div className="text-xs text-bot-muted/50">{subtitle}</div>
     </div>
   );
@@ -369,7 +755,11 @@ function SecretInput({
           onClick={onToggle}
           className="absolute right-3 top-1/2 -translate-y-1/2 text-bot-muted hover:text-white transition-colors"
         >
-          {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          {show ? (
+            <EyeOff className="w-4 h-4" />
+          ) : (
+            <Eye className="w-4 h-4" />
+          )}
         </button>
       </div>
     </div>

@@ -207,12 +207,20 @@ export const defaultPortfolio: Portfolio = {
 
 // ─── Config Types ─────────────────────────────────────────────
 
+import type { AIProviderType } from "../services/aiProviders";
+
 export interface BotConfig {
   polymarket_api_key: string;
   polymarket_secret: string;
   polymarket_passphrase: string;
+  // AI multi-provider
+  ai_provider: AIProviderType;
+  ai_model: string;
+  ai_api_keys: Partial<Record<AIProviderType, string>>;
+  // Legacy (kept for backward compat migration)
   claude_api_key: string;
   claude_model: string;
+  // Trading
   initial_balance: number;
   max_bet_size: number;
   min_edge_threshold: number;
@@ -228,6 +236,9 @@ export const defaultConfig: BotConfig = {
   polymarket_api_key: "",
   polymarket_secret: "",
   polymarket_passphrase: "",
+  ai_provider: "anthropic",
+  ai_model: "claude-sonnet-4-20250514",
+  ai_api_keys: {},
   claude_api_key: "",
   claude_model: "claude-sonnet-4-20250514",
   initial_balance: 1500.0,
@@ -240,6 +251,27 @@ export const defaultConfig: BotConfig = {
   survival_mode: true,
   paper_trading: true,
 };
+
+/** Migrate old config format (claude-only) to multi-provider */
+export function migrateBotConfig(config: any): BotConfig {
+  const migrated = { ...defaultConfig, ...config };
+  // If old claude_api_key exists but ai_api_keys doesn't have it
+  if (migrated.claude_api_key && (!migrated.ai_api_keys || !migrated.ai_api_keys.anthropic)) {
+    migrated.ai_api_keys = {
+      ...migrated.ai_api_keys,
+      anthropic: migrated.claude_api_key,
+    };
+  }
+  // If no ai_provider set, default to anthropic
+  if (!migrated.ai_provider) {
+    migrated.ai_provider = "anthropic";
+  }
+  // If no ai_model set, use claude_model or default
+  if (!migrated.ai_model) {
+    migrated.ai_model = migrated.claude_model || "claude-sonnet-4-20250514";
+  }
+  return migrated;
+}
 
 export const defaultStats: BotStats = {
   current_balance: 1500.0,

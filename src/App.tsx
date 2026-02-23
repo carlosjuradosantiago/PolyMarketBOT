@@ -310,7 +310,13 @@ function App() {
       addActivity(t("app.startingResearch"), "Inference");
       setIsAnalyzing(true);
 
-      const smartResult = await runSmartCycle(currentPortfolio, freshMarkets, config.claude_model);
+      const smartResult = await runSmartCycle(
+        currentPortfolio,
+        freshMarkets,
+        config.claude_model,
+        config.ai_provider,
+        config.ai_model,
+      );
 
       // Update portfolio if bets were placed
       if (smartResult.betsPlaced.length > 0) {

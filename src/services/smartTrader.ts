@@ -17,7 +17,9 @@ import {
   KellyResult,
   MarketAnalysis,
 } from "../types";
-import { analyzeMarketsWithClaude, loadCostTracker, formatCost, ClaudeResearchResult, PerformanceHistory, SkippedMarket } from "./claudeAI";
+import { loadCostTracker, formatCost, ClaudeResearchResult, PerformanceHistory, SkippedMarket } from "./claudeAI";
+import { analyzeMarketsWithAI } from "./aiService";
+import type { AIProviderType } from "./aiProviders";
 import {
   JUNK_PATTERNS, JUNK_REGEXES, WEATHER_RE,
   computeMinLiquidity, MIN_VOLUME, WEATHER_MIN_LIQUIDITY, WEATHER_MIN_VOLUME,
@@ -545,6 +547,8 @@ export async function runSmartCycle(
   portfolio: Portfolio,
   allMarkets: PolymarketMarket[],
   claudeModel?: string,
+  aiProvider?: AIProviderType,
+  aiModel?: string,
 ): Promise<SmartCycleResult> {
   // ─── Cycle Lock: prevent concurrent execution ─────
   // Check BOTH in-memory flag AND localStorage (survives reload)
@@ -560,7 +564,7 @@ export async function runSmartCycle(
   _setCycleLock();
 
   try {
-    return await _runSmartCycleInner(portfolio, allMarkets, claudeModel);
+    return await _runSmartCycleInner(portfolio, allMarkets, claudeModel, aiProvider, aiModel);
   } finally {
     _cycleRunning = false;
     _clearCycleLock();
@@ -571,6 +575,8 @@ async function _runSmartCycleInner(
   portfolio: Portfolio,
   allMarkets: PolymarketMarket[],
   claudeModel?: string,
+  aiProvider?: AIProviderType,
+  aiModel?: string,
 ): Promise<SmartCycleResult> {
   const activities: ActivityEntry[] = [];
   const betsPlaced: KellyResult[] = [];
@@ -625,7 +631,7 @@ async function _runSmartCycleInner(
     shortTermList: [],
     prompt: "",
     rawResponse: "",
-    model: claudeModel || "claude-sonnet-4-20250514",
+    model: aiModel || claudeModel || "claude-sonnet-4-20250514",
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
@@ -824,17 +830,21 @@ async function _runSmartCycleInner(
     const batchLabel = `Batch ${batchIdx + 1}/${batches.length}`;
 
     log(`\n═══ ${batchLabel}: ${batch.length} mercados ═══`);
-    activities.push(activity(`📡 ${batchLabel}: Enviando ${batch.length} mercados ${expiryLabel} a Claude...`, "Inference"));
+    const providerLabel = aiProvider ? aiProvider.toUpperCase() : "Claude";
+    activities.push(activity(`📡 ${batchLabel}: Enviando ${batch.length} mercados ${expiryLabel} a ${providerLabel}...`, "Inference"));
 
     let aiResult: ClaudeResearchResult;
 
     try {
-      // Tell Claude the available cash (true Kelly bankroll)
-      aiResult = await analyzeMarketsWithClaude(
+      // Use unified AI service (routes to correct provider)
+      const effectiveProvider = aiProvider || "anthropic";
+      const effectiveModel = aiModel || claudeModel || "claude-sonnet-4-20250514";
+      aiResult = await analyzeMarketsWithAI(
+        effectiveProvider,
+        effectiveModel,
         batch,
         updatedPortfolio.openOrders,
         updatedPortfolio.balance,
-        claudeModel,
         perfHistory,
       );
 
