@@ -173,9 +173,21 @@ export function calculateModelCost(
   return (inputTokens / 1_000_000) * model.inputPrice + (outputTokens / 1_000_000) * model.outputPrice;
 }
 
-/** Estimate cost per cycle for a model (rough: ~1500 input tokens, ~800 output) */
+/** Estimate cost per cycle for a model (rough: ~1500 input tokens, ~800 output per batch) */
 export function estimateCycleCost(model: AIModelDef): number {
   return ((model.inputPrice * 1500 + model.outputPrice * 800) / 1_000_000);
+}
+
+/**
+ * Estimate monthly cost for a model.
+ * Bot runs 1 cycle/day, each cycle = 2 batches (~1500 in + ~800 out per batch).
+ * Monthly = batchCost × 2 batches × 30 days = batchCost × 60
+ * Free tier models return 0.
+ */
+export function estimateMonthlyCost(model: AIModelDef): number {
+  if (model.freeTier) return 0;
+  const batchCost = (model.inputPrice * 1500 + model.outputPrice * 800) / 1_000_000;
+  return batchCost * 2 * 30; // 2 batches/cycle × 30 days
 }
 
 /** Check if a model has free tier */

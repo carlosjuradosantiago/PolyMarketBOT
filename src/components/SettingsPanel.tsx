@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { BotConfig } from "../types";
 import type { AIProviderType, AIModelDef, AIProviderDef } from "../services/aiProviders";
-import { AI_PROVIDERS, getProvider, estimateCycleCost } from "../services/aiProviders";
+import { AI_PROVIDERS, getProvider, estimateCycleCost, estimateMonthlyCost } from "../services/aiProviders";
 import { testApiKey } from "../services/aiService";
 import { useTranslation } from "../i18n";
 
@@ -727,6 +727,7 @@ function ModelCard({
   onSelect: () => void;
 }) {
   const costPerCycle = estimateCycleCost(model);
+  const monthlyCost = estimateMonthlyCost(model);
   const isFreeTier = !!model.freeTier;
 
   return (
@@ -815,6 +816,13 @@ function ModelCard({
             ${costPerCycle.toFixed(4)}
           </span>
           /ciclo
+        </span>
+        <span className="text-[11px] text-bot-muted/40">
+          ~
+          <span className={`font-mono ${isFreeTier ? "text-emerald-400/80" : "text-bot-cyan/80"}`}>
+            {isFreeTier ? "$0" : `$${monthlyCost.toFixed(2)}`}
+          </span>
+          /mes
         </span>
         {model.contextWindow >= 1000000 && (
           <span className="text-[10px] text-purple-400/50">1M ctx</span>
