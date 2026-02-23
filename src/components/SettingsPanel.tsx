@@ -115,7 +115,23 @@ export default function SettingsPanel({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await onSave(form);
+      // CRITICAL: Merge ALL pendingKeys into form before saving.
+      // Users expect typed keys to be saved even without clicking "Verificar".
+      const mergedKeys = { ...form.ai_api_keys };
+      for (const [provider, key] of Object.entries(pendingKeys)) {
+        if (key && key.trim().length > 5) {
+          mergedKeys[provider] = key.trim();
+        }
+      }
+      const finalForm: BotConfig = {
+        ...form,
+        ai_api_keys: mergedKeys,
+        // Keep legacy claude_api_key in sync
+        claude_api_key: mergedKeys.anthropic || form.claude_api_key || "",
+      };
+      console.log("[Settings] Saving config:", finalForm.ai_provider, finalForm.ai_model,
+        "keys:", Object.keys(mergedKeys).filter(k => mergedKeys[k]?.length > 5).join(", "));
+      await onSave(finalForm);
     } finally {
       setIsSaving(false);
     }
@@ -127,16 +143,16 @@ export default function SettingsPanel({
     [form.ai_provider],
   );
 
-  // Count configured API keys
-  // Count configured API keys (only those actually saved in form)
+  // Count configured API keys (includes pending keys that haven't been verified yet)
   const configuredKeys = useMemo(() => {
     return AI_PROVIDERS.filter((p) => {
       const key =
+        pendingKeys[p.id] ||
         form.ai_api_keys?.[p.id] ||
         (p.id === "anthropic" ? form.claude_api_key : "");
       return key && key.length > 5;
     }).length;
-  }, [form.ai_api_keys, form.claude_api_key]);
+  }, [form.ai_api_keys, form.claude_api_key, pendingKeys]);
 
   const tabs = [
     { id: "keys" as const, label: t("settings.tabKeys"), icon: Key, badge: `${configuredKeys}/5` },
