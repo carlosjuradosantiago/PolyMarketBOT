@@ -223,7 +223,23 @@ ${marketLines}
 PROCESS: Research ALL ${shortTermMarkets.length} markets using web_search. No limit on searches — be thorough. For each market, search → analyze → decide (recommend or skip with data-backed reason).
 
 MATH:
-  pReal = ALWAYS your probability that YES happens (regardless of which side you recommend).
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │ pReal = ALWAYS P(YES outcome happens).                             │
+  │ NOT "probability my bet is correct". NOT "probability of the side  │
+  │ I recommend". ALWAYS P(YES).                                       │
+  │                                                                    │
+  │ EXAMPLE: "Seoul ≥12°C?" forecast 6°C → pReal ≈ 0.001 (YES is     │
+  │ nearly impossible), side=NO. Do NOT set pReal=0.85 thinking        │
+  │ "I'm 85% sure NO wins" — that's the WRONG number.                 │
+  │                                                                    │
+  │ SELF-CHECK before outputting each recommendation:                  │
+  │   • If side=YES → pReal MUST be > pMarket (you think YES is       │
+  │     underpriced). If pReal < pMarket, you have a contradiction.   │
+  │   • If side=NO → pReal MUST be < pMarket (you think YES is        │
+  │     overpriced). If pReal > pMarket, you have a contradiction.    │
+  │   • edge = |pReal - pMarket|. If edge > 0.40, your pReal is WRONG.│
+  │     Go back and fix it.                                            │
+  └─────────────────────────────────────────────────────────────────────┘
   pMarket = YES price shown above.
   edge = |pReal - pMarket| (must be ≥ minEdge for that market).
   minEdge = max(0.06, spread + 0.04). Ejemplo: spread 8% → minEdge 12%. spread 3% → minEdge 7%. spread 15% → minEdge 19%.
@@ -243,7 +259,11 @@ CRITICAL RULES:
   - NEVER say "already resolved" or "actual result was $X" unless you opened a source URL in THIS session with web_search AND the source explicitly shows the exact number. If you cannot cite a URL you opened, the data is imaginary.
   - EVEN WITH web_search: Be EXTREMELY careful with box office numbers. "Opening weekend" = Friday-Sunday (3 days), NOT 4-day holiday weekends. If a source says "$17.7M 4-day" but the market says "opening weekend", the 3-day number is what matters. DOUBLE-CHECK the exact number format the market uses vs what your source reports.
   - RESOLUTION CLAIM GUARD: If you believe a market is "already resolved", your pReal should STILL reflect uncertainty about resolution criteria interpretation. Cap pReal at 0.80 max for "resolved" markets and cap edge at 0.40 max. Markets that seem too good to be true usually are.
-  - EDGE HARD CAP: No recommendation may have edge > 0.40 (40%). If your math shows edge > 40%, you are WRONG — go back, reduce pReal. Real edges in prediction markets are 5-25%. Anything above 30% requires extraordinary evidence from multiple independent sources found via web_search.
+  - EDGE HARD CAP: edge > 0.40 (40%) is ALWAYS wrong. If your math gives edge > 40%, STOP — your pReal is incorrect. Go back, re-derive pReal closer to pMarket. Real prediction market edges are 5-25%.
+  - SIDE-PREAL COHERENCE (mandatory check per recommendation):
+      If side=YES and pReal < pMarket → CONTRADICTION. You think YES is MORE likely but your pReal says it's LESS likely than market. Fix pReal or flip side.
+      If side=NO and pReal > pMarket → CONTRADICTION. You think YES is LESS likely but your pReal says it's MORE likely than market. Fix pReal or flip side.
+      This check catches the #1 most common error: confusing P(YES) with P(my bet wins).
   - PREAL ANCHOR: Before setting pReal, ask "Does the market price already reflect what most people know?" If yes, your pReal should be close to pMarket (within ±15%). Only deviate significantly (>20% from pMarket) if you found NEW information via web_search that the market has not yet priced in.
   - NEVER skip a weather market with any variation of "no data"/"insufficient data"/"no forecast". Use the WEATHER METHOD with forecast HIGH + σ.
   - For entertainment/box office: only claim resolved if you found the actual data via web_search with a URL AND the number EXACTLY matches the market's criteria (3-day vs 4-day, domestic vs worldwide, etc.).
@@ -282,8 +302,11 @@ IMPORTANT: Always include "skipped" array listing ALL markets you did NOT recomm
 If nothing qualifies: {"summary":"reason","skipped":[...],"recommendations":[]}
 
 ═══ MANDATORY FINAL STEP ═══
-After completing ALL web searches, you MUST output the JSON response IMMEDIATELY.
-Do NOT write additional commentary or analysis after the searches — go STRAIGHT to the JSON block.
+Before outputting the JSON, verify EACH recommendation:
+  1. pReal = P(YES happens). NOT P(my bet wins). Check: does the number make sense as "chance YES occurs"?
+  2. If side=YES → pReal > pMarket. If side=NO → pReal < pMarket. Any contradiction = FIX NOW.
+  3. edge = |pReal - pMarket| ≤ 0.40. If violated, reduce pReal toward pMarket.
+Then output the JSON IMMEDIATELY. No commentary after searches — go STRAIGHT to JSON.
 Never finish your response without the complete JSON output. The JSON is the ONLY thing that matters.
 If you run out of searches, use the data you already have. ALWAYS output JSON.`;
 }
@@ -469,7 +492,7 @@ export async function analyzeMarketsWithClaude(
       analyses = parsed.recommendations
         .filter((item: any) => item.recommendedSide && item.recommendedSide.toUpperCase() !== "SKIP")
         .map((item: any) => {
-          const side = (item.recommendedSide || "SKIP").toUpperCase();
+          let side = (item.recommendedSide || "SKIP").toUpperCase();
           let pReal = parseFloat(item.pReal) || 0;
           const pMarket = parseFloat(item.pMarket) || 0;
           let pLow = parseFloat(item.pLow) || 0;
@@ -486,6 +509,19 @@ export async function analyzeMarketsWithClaude(
             const origLow = pLow;
             pLow = 1 - pHigh;
             pHigh = 1 - origLow;
+          }
+
+          // ═══ SIDE-CONSISTENCY CHECK: ensure side aligns with pReal vs pMarket
+          // If side=YES → we think P(YES) > pMarket → pReal should be > pMarket
+          // If side=NO → we think P(YES) < pMarket → pReal should be < pMarket
+          if (pMarket > 0.01 && pMarket < 0.99) {
+            if (side === "YES" && pReal < pMarket) {
+              log(`⚠️ SIDE-FIX: side=YES but pReal(${pReal.toFixed(3)}) < pMarket(${pMarket.toFixed(3)}) → auto-flip to NO`);
+              side = "NO";
+            } else if (side === "NO" && pReal > pMarket) {
+              log(`⚠️ SIDE-FIX: side=NO but pReal(${pReal.toFixed(3)}) > pMarket(${pMarket.toFixed(3)}) → auto-flip to YES`);
+              side = "YES";
+            }
           }
 
           const edge = Math.abs(pReal - pMarket);
@@ -599,12 +635,17 @@ Output ONLY valid JSON (no code fence, no extra text):
             analyses = retryParsed.recommendations
               .filter((item: any) => item.recommendedSide && item.recommendedSide.toUpperCase() !== "SKIP")
               .map((item: any) => {
-                const side = (item.recommendedSide || "SKIP").toUpperCase();
+                let side = (item.recommendedSide || "SKIP").toUpperCase();
                 let pReal = parseFloat(item.pReal) || 0;
                 const pMarket = parseFloat(item.pMarket) || 0;
                 let pLow = parseFloat(item.pLow) || 0;
                 let pHigh = parseFloat(item.pHigh) || 0;
                 if (side === "NO" && pReal > 0.50) { pReal = 1 - pReal; const ol = pLow; pLow = 1 - pHigh; pHigh = 1 - ol; }
+                // ═══ SIDE-CONSISTENCY CHECK (retry path)
+                if (pMarket > 0.01 && pMarket < 0.99) {
+                  if (side === "YES" && pReal < pMarket) { log(`⚠️ SIDE-FIX (retry): YES but pReal(${pReal.toFixed(3)}) < pMarket(${pMarket.toFixed(3)}) → NO`); side = "NO"; }
+                  else if (side === "NO" && pReal > pMarket) { log(`⚠️ SIDE-FIX (retry): NO but pReal(${pReal.toFixed(3)}) > pMarket(${pMarket.toFixed(3)}) → YES`); side = "YES"; }
+                }
                 return {
                   marketId: item.marketId || "", question: item.question || "",
                   pMarket, pReal, pLow, pHigh, edge: Math.abs(pReal - pMarket),

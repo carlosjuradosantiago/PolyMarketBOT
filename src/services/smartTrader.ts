@@ -946,6 +946,16 @@ async function _runSmartCycleInner(
       rr.pMarket = enrichedAnalysis.pMarket;
       rr.edge = enrichedAnalysis.edge;
 
+      // ── NEGATIVE EDGE CHECK (post-enrichment) ─────────────────────
+      // A negative enriched edge means the real market price contradicts
+      // the recommended side. Skip instead of relying on Kelly to reject.
+      if (enrichedAnalysis.edge <= 0) {
+        rr.decision = `SKIP — NEGATIVE EDGE: side=${analysis.recommendedSide} but enriched edge=${(enrichedAnalysis.edge * 100).toFixed(1)}% (pReal=${(analysis.pReal * 100).toFixed(1)}%, pMkt=${(enrichedAnalysis.pMarket * 100).toFixed(1)}%). Side inconsistent with real price.`;
+        debugLog.results.push(rr);
+        log(`     🚫 NEGATIVE EDGE: side=${analysis.recommendedSide} produces edge=${(enrichedAnalysis.edge * 100).toFixed(1)}%. Real price ${(enrichedAnalysis.pMarket * 100).toFixed(1)}% contradicts direction. SKIP`);
+        continue;
+      }
+
       // ── EDGE GUARD (post-enrichment) ──────────────────────────────
       // Claude's edge guard uses Claude-reported pMarket, but real market
       // prices can differ → enriched edge may exceed 40%.
