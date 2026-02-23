@@ -453,11 +453,11 @@ export async function analyzeMarketsWithClaude(
   // Count and log web searches performed
   const webSearchUses = contentBlocks.filter((b: any) => b.type === "server_tool_use" && b.name === "web_search");
   const webSearchResults = contentBlocks.filter((b: any) => b.type === "web_search_tool_result");
+  const searchQueries: string[] = webSearchUses.map((s: any) => s.input?.query || "?");
   if (webSearchUses.length > 0) {
     log(`🌐 Web searches: ${webSearchUses.length} performed, ${webSearchResults.length} results received`);
     // Log search queries for transparency
-    webSearchUses.forEach((s: any, i: number) => {
-      const query = s.input?.query || "?";
+    searchQueries.forEach((query, i) => {
       log(`   🔍 Search ${i + 1}: "${query}"`);
     });
   } else {
@@ -689,6 +689,8 @@ Output ONLY valid JSON (no code fence, no extra text):
     inputTokens, outputTokens, costUsd, model: modelId, timestamp: localTimestamp(),
     prompt, rawResponse: content, responseTimeMs: elapsed,
     summary, recommendations: analyses.length,
+    webSearches: webSearchUses.length,
+    searchQueries,
   };
 
   // Persist to SQLite (single source of truth)

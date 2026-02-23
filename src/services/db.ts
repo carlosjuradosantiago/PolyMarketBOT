@@ -317,6 +317,8 @@ export async function dbAddAICost(usage: AIUsage): Promise<void> {
     response_time_ms: usage.responseTimeMs || 0,
     summary: usage.summary || null,
     recommendations: usage.recommendations || 0,
+    web_searches: usage.webSearches || 0,
+    search_queries: usage.searchQueries || [],
   });
 }
 

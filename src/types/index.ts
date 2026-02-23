@@ -330,6 +330,8 @@ export interface AIUsage {
   responseTimeMs?: number; // Response time in ms
   summary?: string;       // Parsed summary from response
   recommendations?: number; // Number of recommendations returned
+  webSearches?: number;   // Number of web_search calls made by Claude
+  searchQueries?: string[]; // The actual queries searched
 }
 
 /** Cumulative AI cost tracker */

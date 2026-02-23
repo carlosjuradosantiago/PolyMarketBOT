@@ -512,6 +512,8 @@ async function dbAddAICost(usage: any): Promise<void> {
     response_time_ms: usage.responseTimeMs || 0,
     summary: usage.summary || null,
     recommendations: usage.recommendations || 0,
+    web_searches: usage.webSearches || 0,
+    search_queries: usage.searchQueries || [],
   });
 }
 
@@ -1026,9 +1028,11 @@ async function callClaudeAPI(
   prompt: string;
   rawResponse: string;
   responseTimeMs: number;
+  webSearches: number;
+  searchQueries: string[];
 }> {
   if (batch.length === 0) {
-    return { analyses: [], skipped: [], usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, model }, summary: "Empty batch", prompt: "", rawResponse: "", responseTimeMs: 0 };
+    return { analyses: [], skipped: [], usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, model }, summary: "Empty batch", prompt: "", rawResponse: "", responseTimeMs: 0, webSearches: 0, searchQueries: [] };
   }
 
   const prompt = buildOSINTPrompt(batch, openOrders, bankroll, history);
@@ -1069,7 +1073,9 @@ async function callClaudeAPI(
 
   // Log web searches
   const webSearchUses = contentBlocks.filter((b: any) => b.type === "server_tool_use" && b.name === "web_search");
+  const searchQueries: string[] = webSearchUses.map((s: any) => s.input?.query || "?");
   log(`🌐 Web searches: ${webSearchUses.length} performed`);
+  searchQueries.forEach((q, i) => log(`   🔍 Search ${i + 1}: "${q}"`));
 
   // Parse response
   let analyses: MarketAnalysis[] = [];
@@ -1149,6 +1155,8 @@ async function callClaudeAPI(
     analyses, skipped: skippedMarkets,
     usage: { inputTokens, outputTokens, costUsd, model },
     summary, prompt, rawResponse: content, responseTimeMs: elapsed,
+    webSearches: webSearchUses.length,
+    searchQueries,
   };
 }
 
@@ -1551,6 +1559,8 @@ Deno.serve(async (req) => {
             responseTimeMs: aiResult.responseTimeMs,
             summary: aiResult.summary,
             recommendations: aiResult.analyses.length,
+            webSearches: aiResult.webSearches,
+            searchQueries: aiResult.searchQueries,
           });
 
           log(`🔬 ${batchLabel}: ${aiResult.analyses.length} recs — ${formatCost(aiResult.usage.costUsd)} (${aiResult.responseTimeMs}ms)`);
