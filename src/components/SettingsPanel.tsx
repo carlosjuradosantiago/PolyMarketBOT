@@ -12,7 +12,7 @@ import { useTranslation } from "../i18n";
 
 interface SettingsPanelProps {
   config: BotConfig;
-  onSave: (config: BotConfig) => void;
+  onSave: (config: BotConfig) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -25,6 +25,7 @@ export default function SettingsPanel({
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<"keys" | "trading" | "ai">("keys");
   const [expandedProvider, setExpandedProvider] = useState<AIProviderType | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const { t } = useTranslation();
 
   // ─── API Key Test State ──────────────────────────
@@ -111,8 +112,13 @@ export default function SettingsPanel({
     }));
   };
 
-  const handleSave = () => {
-    onSave(form);
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await onSave(form);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Active provider definition
@@ -701,10 +707,24 @@ export default function SettingsPanel({
             </button>
             <button
               onClick={handleSave}
-              className="flex items-center gap-2 bg-bot-cyan/15 text-bot-cyan px-5 py-2 rounded-lg text-sm font-display font-semibold hover:bg-bot-cyan/25 border border-bot-cyan/20 transition-colors"
+              disabled={isSaving}
+              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-display font-semibold border transition-colors ${
+                isSaving
+                  ? "bg-yellow-500/15 text-yellow-400 border-yellow-500/20 cursor-wait"
+                  : "bg-bot-cyan/15 text-bot-cyan border-bot-cyan/20 hover:bg-bot-cyan/25"
+              }`}
             >
-              <Save className="w-4 h-4" />
-              {t("settings.save")}
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  {t("settings.save")}
+                </>
+              )}
             </button>
           </div>
         </div>

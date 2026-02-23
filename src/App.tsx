@@ -104,7 +104,9 @@ function App() {
           const merged = migrateBotConfig(savedConfig);
           setConfig(merged);
           setMaxExpiry(merged.max_expiry_hours || 72);
-          console.log("[App] Config loaded from bot_kv:", merged.ai_provider, merged.ai_model);
+          console.log("[App] ✅ Config loaded from bot_kv:", merged.ai_provider, merged.ai_model);
+        } else {
+          console.warn("[App] ⚠️ No saved config in bot_kv, using defaults:", defaultConfig.ai_provider, defaultConfig.ai_model);
         }
 
         // Step 3: Load AI cost tracker from DB (full history with prompt/response)
@@ -563,14 +565,23 @@ function App() {
   const handleSaveConfig = useCallback(async (newConfig: BotConfig) => {
     const oldConfig = config;
     setConfig(newConfig);
-    setShowSettings(false);
     setMaxExpiry(newConfig.max_expiry_hours);
 
     // Persistir config completa en bot_kv (ai_provider, ai_model, api_keys, etc.)
-    try {
-      await dbSaveBotConfig(newConfig);
-    } catch (e) {
-      console.error("[App] Failed to save bot config to bot_kv:", e);
+    const result = await dbSaveBotConfig(newConfig);
+    if (result.ok) {
+      addActivity(
+        `✅ Config guardada: ${newConfig.ai_provider}/${newConfig.ai_model}`,
+        "Info",
+      );
+      setShowSettings(false);
+    } else {
+      addActivity(
+        `❌ Error guardando config: ${result.error}`,
+        "Error",
+      );
+      // Keep settings open so user sees the error
+      console.error("[App] Config save failed:", result.error);
     }
 
     // If initial_balance changed, apply to DB + reset portfolio with new bankroll

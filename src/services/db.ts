@@ -153,43 +153,139 @@ export async function dbSetInitialBalance(amount: number): Promise<void> {
 /** Guarda la configuración del bot en bot_kv (Supabase).
  *  - ai_provider y ai_model como filas individuales (Edge Function las lee)
  *  - bot_config como JSON blob (frontend las recarga)
+ *  Retorna { ok, error } para que el UI muestre feedback.
  */
-export async function dbSaveBotConfig(config: Record<string, any>): Promise<void> {
+export async function dbSaveBotConfig(
+  config: Record<string, any>,
+): Promise<{ ok: boolean; error?: string }> {
+  const provider = config.ai_provider || "google";
+  const model = config.ai_model || "gemini-2.5-flash";
+  console.log("[DB] dbSaveBotConfig → writing:", provider, model);
+
   try {
     const rows = [
-      { key: "ai_provider", value: config.ai_provider || "google" },
-      { key: "ai_model", value: config.ai_model || "gemini-2.5-flash" },
+      { key: "ai_provider", value: provider },
+      { key: "ai_model", value: model },
       { key: "bot_config", value: JSON.stringify(config) },
     ];
-    const { error } = await supabase.from("bot_kv").upsert(rows, { onConflict: "key" });
+
+    // Attempt 1: supabase-js upsert
+    const { error } = await supabase
+      .from("bot_kv")
+      .upsert(rows, { onConflict: "key" });
+
     if (error) {
-      console.error("[DB] dbSaveBotConfig failed:", error);
-    } else {
-      console.log("[DB] Bot config saved to bot_kv:", config.ai_provider, config.ai_model);
+      console.warn("[DB] supabase-js upsert failed, trying REST fallback:", error.message);
+      // Attempt 2: direct REST API fallback
+      const ok = await _dbSaveConfigREST(rows);
+      if (!ok) {
+        const msg = `Supabase upsert: ${error.message}; REST fallback also failed`;
+        console.error("[DB] dbSaveBotConfig FAILED:", msg);
+        return { ok: false, error: msg };
+      }
     }
-  } catch (e) {
+
+    // Verify the write succeeded by reading back
+    const verify = await dbLoadBotConfig();
+    if (!verify || verify.ai_provider !== provider || verify.ai_model !== model) {
+      const msg = `Verify failed: wrote ${provider}/${model}, read back ${verify?.ai_provider}/${verify?.ai_model}`;
+      console.error("[DB] dbSaveBotConfig verify FAILED:", msg);
+      return { ok: false, error: msg };
+    }
+
+    console.log("[DB] ✅ Bot config saved & verified:", provider, model);
+    return { ok: true };
+  } catch (e: any) {
     console.error("[DB] dbSaveBotConfig exception:", e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+/** REST API fallback for when supabase-js upsert fails */
+async function _dbSaveConfigREST(
+  rows: { key: string; value: string }[],
+): Promise<boolean> {
+  try {
+    for (const row of rows) {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/bot_kv?on_conflict=key`,
+        {
+          method: "POST",
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            "Content-Type": "application/json",
+            Prefer: "resolution=merge-duplicates",
+          },
+          body: JSON.stringify(row),
+        },
+      );
+      if (!res.ok) {
+        console.error("[DB] REST fallback POST failed:", res.status, await res.text());
+        return false;
+      }
+    }
+    console.log("[DB] REST fallback saved successfully");
+    return true;
+  } catch (e) {
+    console.error("[DB] REST fallback exception:", e);
+    return false;
   }
 }
 
 /** Carga la configuración del bot desde bot_kv (Supabase).
  *  Retorna null si no hay config guardada.
+ *  Intenta supabase-js primero, luego REST API directo como fallback.
  */
 export async function dbLoadBotConfig(): Promise<Record<string, any> | null> {
+  console.log("[DB] dbLoadBotConfig → loading from bot_kv...");
+
+  // Attempt 1: supabase-js
   try {
     const { data, error } = await supabase
       .from("bot_kv")
       .select("key, value")
       .eq("key", "bot_config")
       .single();
-    if (error || !data) return null;
-    const parsed = JSON.parse(data.value);
-    console.log("[DB] Bot config loaded from bot_kv:", parsed.ai_provider, parsed.ai_model);
-    return parsed;
+
+    if (!error && data && data.value) {
+      const parsed = JSON.parse(data.value);
+      console.log("[DB] ✅ Config loaded (supabase-js):", parsed.ai_provider, parsed.ai_model);
+      return parsed;
+    }
+    if (error) {
+      console.warn("[DB] supabase-js load failed:", error.message, "→ trying REST fallback");
+    }
   } catch (e) {
-    console.error("[DB] dbLoadBotConfig exception:", e);
-    return null;
+    console.warn("[DB] supabase-js load exception:", e, "→ trying REST fallback");
   }
+
+  // Attempt 2: direct REST API
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bot_kv?select=key,value&key=eq.bot_config`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+        },
+      },
+    );
+    if (res.ok) {
+      const arr = await res.json();
+      if (arr.length > 0 && arr[0].value) {
+        const parsed = JSON.parse(arr[0].value);
+        console.log("[DB] ✅ Config loaded (REST fallback):", parsed.ai_provider, parsed.ai_model);
+        return parsed;
+      }
+    }
+    console.warn("[DB] REST fallback returned no data");
+  } catch (e) {
+    console.error("[DB] REST fallback load exception:", e);
+  }
+
+  console.warn("[DB] dbLoadBotConfig → no config found, returning null");
+  return null;
 }
 
 // ─── Orders ───────────────────────────────────────────
