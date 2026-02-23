@@ -236,11 +236,11 @@ export const defaultConfig: BotConfig = {
   polymarket_api_key: "",
   polymarket_secret: "",
   polymarket_passphrase: "",
-  ai_provider: "anthropic",
-  ai_model: "claude-sonnet-4-20250514",
+  ai_provider: "google",
+  ai_model: "gemini-2.5-flash",
   ai_api_keys: {},
   claude_api_key: "",
-  claude_model: "claude-sonnet-4-20250514",
+  claude_model: "gemini-2.5-flash",
   initial_balance: 1500.0,
   max_bet_size: 150.0,
   min_edge_threshold: 0.10,
@@ -262,13 +262,13 @@ export function migrateBotConfig(config: any): BotConfig {
       anthropic: migrated.claude_api_key,
     };
   }
-  // If no ai_provider set, default to anthropic
+  // If no ai_provider set, default to google (Anthropic credits depleted)
   if (!migrated.ai_provider) {
-    migrated.ai_provider = "anthropic";
+    migrated.ai_provider = "google";
   }
-  // If no ai_model set, use claude_model or default
+  // If no ai_model set, use saved model or gemini-2.5-flash
   if (!migrated.ai_model) {
-    migrated.ai_model = migrated.claude_model || "claude-sonnet-4-20250514";
+    migrated.ai_model = migrated.claude_model || "gemini-2.5-flash";
   }
   return migrated;
 }

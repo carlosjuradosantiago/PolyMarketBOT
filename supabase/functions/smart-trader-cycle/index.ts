@@ -22,14 +22,36 @@ const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 
 type AIProviderType = "anthropic" | "google" | "openai" | "xai" | "deepseek";
 
+// API keys from env (server secrets) — will be supplemented by bot_kv keys
+let envApiKeys: Record<AIProviderType, string> = {
+  anthropic: CLAUDE_API_KEY,
+  google: GEMINI_API_KEY,
+  openai: OPENAI_API_KEY,
+  xai: XAI_API_KEY,
+  deepseek: DEEPSEEK_API_KEY,
+};
+// Keys from bot_kv (user-entered via web form) — loaded on demand
+let userApiKeys: Partial<Record<AIProviderType, string>> = {};
+let userApiKeysLoaded = false;
+
+async function loadUserApiKeys(): Promise<void> {
+  if (userApiKeysLoaded) return;
+  try {
+    const { data } = await supabase.from("bot_kv").select("value").eq("key", "bot_config").single();
+    if (data?.value) {
+      const config = JSON.parse(data.value);
+      if (config.ai_api_keys) {
+        userApiKeys = config.ai_api_keys;
+        log(`[Keys] Loaded user API keys from bot_kv: ${Object.keys(userApiKeys).filter(k => userApiKeys[k as AIProviderType]).join(", ")}`);
+      }
+    }
+  } catch { /* ignore */ }
+  userApiKeysLoaded = true;
+}
+
 function getProviderApiKey(provider: AIProviderType): string {
-  switch (provider) {
-    case "anthropic": return CLAUDE_API_KEY;
-    case "google": return GEMINI_API_KEY;
-    case "openai": return OPENAI_API_KEY;
-    case "xai": return XAI_API_KEY;
-    case "deepseek": return DEEPSEEK_API_KEY;
-  }
+  // Priority: 1) Server env secrets, 2) User-entered keys from bot_kv
+  return envApiKeys[provider] || userApiKeys[provider] || "";
 }
 
 // ─── Supabase Client (service role — full access) ────
@@ -52,7 +74,7 @@ const BATCH_SIZE = 4;
 const MAX_BATCHES_PER_CYCLE = 2; // Reduced from 5 for Edge Function timeout
 const MAX_ANALYZED_PER_CYCLE = 8; // 2 batches × 4
 const MIN_POOL_TARGET = 15;
-const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted, use Gemini as default
 
 // Kelly
 const KELLY_FRACTION = 0.50;
@@ -1340,15 +1362,27 @@ async function callGenericProviderAPI(
 async function getAIProviderConfig(): Promise<{ provider: AIProviderType; model: string }> {
   try {
     const { data } = await supabase.from("bot_kv").select("key, value").in("key", ["ai_provider", "ai_model"]);
-    let provider: AIProviderType = "anthropic";
+    let provider: AIProviderType = "google";  // Default to Google (Anthropic credits depleted)
     let model = DEFAULT_MODEL;
     for (const row of data || []) {
       if (row.key === "ai_provider") provider = row.value as AIProviderType;
       if (row.key === "ai_model") model = row.value;
     }
+    // Verify the selected provider has an API key configured
+    const apiKey = getProviderApiKey(provider);
+    if (!apiKey) {
+      log(`⚠️ No API key for provider "${provider}", falling back to google/gemini-2.5-flash`);
+      // Try Google as fallback
+      const geminiKey = getProviderApiKey("google");
+      if (geminiKey) return { provider: "google", model: "gemini-2.5-flash" };
+      // Last resort: try any provider with a key
+      for (const p of ["openai", "xai", "deepseek", "anthropic"] as AIProviderType[]) {
+        if (getProviderApiKey(p)) return { provider: p, model: DEFAULT_MODEL };
+      }
+    }
     return { provider, model };
   } catch {
-    return { provider: "anthropic", model: DEFAULT_MODEL };
+    return { provider: "google", model: DEFAULT_MODEL };
   }
 }
 
@@ -1536,10 +1570,11 @@ Deno.serve(async (req) => {
     log(`UTC: ${new Date().toISOString()}`);
 
     // ─── Validate env ────────────────────────────
+    await loadUserApiKeys(); // Load user API keys from bot_kv before checking provider
     const aiConfig = await getAIProviderConfig();
     const activeApiKey = getProviderApiKey(aiConfig.provider);
     if (!activeApiKey) {
-      throw new Error(`API key for ${aiConfig.provider} not configured in Edge Function secrets`);
+      throw new Error(`No API key for ${aiConfig.provider}. Set it via Settings (web) or Supabase secrets.`);
     }
     log(`🤖 Proveedor: ${aiConfig.provider}, Modelo: ${aiConfig.model}`);
 

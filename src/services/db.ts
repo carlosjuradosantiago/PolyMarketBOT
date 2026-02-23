@@ -157,8 +157,8 @@ export async function dbSetInitialBalance(amount: number): Promise<void> {
 export async function dbSaveBotConfig(config: Record<string, any>): Promise<void> {
   try {
     const rows = [
-      { key: "ai_provider", value: config.ai_provider || "anthropic" },
-      { key: "ai_model", value: config.ai_model || "claude-sonnet-4-20250514" },
+      { key: "ai_provider", value: config.ai_provider || "google" },
+      { key: "ai_model", value: config.ai_model || "gemini-2.5-flash" },
       { key: "bot_config", value: JSON.stringify(config) },
     ];
     const { error } = await supabase.from("bot_kv").upsert(rows, { onConflict: "key" });

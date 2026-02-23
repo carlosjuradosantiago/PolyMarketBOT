@@ -633,7 +633,7 @@ async function _runSmartCycleInner(
     shortTermList: [],
     prompt: "",
     rawResponse: "",
-    model: aiModel || claudeModel || "claude-sonnet-4-20250514",
+    model: aiModel || claudeModel || "gemini-2.5-flash",
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
@@ -832,15 +832,15 @@ async function _runSmartCycleInner(
     const batchLabel = `Batch ${batchIdx + 1}/${batches.length}`;
 
     log(`\n═══ ${batchLabel}: ${batch.length} mercados ═══`);
-    const providerLabel = aiProvider ? aiProvider.toUpperCase() : "Claude";
+    const providerLabel = aiProvider ? aiProvider.toUpperCase() : "GOOGLE";
     activities.push(activity(`📡 ${batchLabel}: Enviando ${batch.length} mercados ${expiryLabel} a ${providerLabel}...`, "Inference"));
 
     let aiResult: ClaudeResearchResult;
 
     try {
       // Use unified AI service (routes to correct provider)
-      const effectiveProvider = aiProvider || "anthropic";
-      const effectiveModel = aiModel || claudeModel || "claude-sonnet-4-20250514";
+      const effectiveProvider = aiProvider || "google";  // Default to Google (Anthropic credits depleted)
+      const effectiveModel = aiModel || claudeModel || "gemini-2.5-flash";
       const effectiveApiKey = apiKeys?.[effectiveProvider];
       aiResult = await analyzeMarketsWithAI(
         effectiveProvider,
