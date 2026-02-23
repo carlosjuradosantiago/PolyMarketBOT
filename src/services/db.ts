@@ -147,6 +147,51 @@ export async function dbSetInitialBalance(amount: number): Promise<void> {
   }).eq("id", 1);
   if (error) console.error("[DB] dbSetInitialBalance failed:", error);
 }
+
+// ─── Bot Config (bot_kv) ─────────────────────────────
+
+/** Guarda la configuración del bot en bot_kv (Supabase).
+ *  - ai_provider y ai_model como filas individuales (Edge Function las lee)
+ *  - bot_config como JSON blob (frontend las recarga)
+ */
+export async function dbSaveBotConfig(config: Record<string, any>): Promise<void> {
+  try {
+    const rows = [
+      { key: "ai_provider", value: config.ai_provider || "anthropic" },
+      { key: "ai_model", value: config.ai_model || "claude-sonnet-4-20250514" },
+      { key: "bot_config", value: JSON.stringify(config) },
+    ];
+    const { error } = await supabase.from("bot_kv").upsert(rows, { onConflict: "key" });
+    if (error) {
+      console.error("[DB] dbSaveBotConfig failed:", error);
+    } else {
+      console.log("[DB] Bot config saved to bot_kv:", config.ai_provider, config.ai_model);
+    }
+  } catch (e) {
+    console.error("[DB] dbSaveBotConfig exception:", e);
+  }
+}
+
+/** Carga la configuración del bot desde bot_kv (Supabase).
+ *  Retorna null si no hay config guardada.
+ */
+export async function dbLoadBotConfig(): Promise<Record<string, any> | null> {
+  try {
+    const { data, error } = await supabase
+      .from("bot_kv")
+      .select("key, value")
+      .eq("key", "bot_config")
+      .single();
+    if (error || !data) return null;
+    const parsed = JSON.parse(data.value);
+    console.log("[DB] Bot config loaded from bot_kv:", parsed.ai_provider, parsed.ai_model);
+    return parsed;
+  } catch (e) {
+    console.error("[DB] dbLoadBotConfig exception:", e);
+    return null;
+  }
+}
+
 // ─── Orders ───────────────────────────────────────────
 
 export async function dbCreateOrder(order: PaperOrder): Promise<void> {

@@ -23,6 +23,7 @@ import {
   defaultConfig,
   defaultPortfolio,
   defaultAICostTracker,
+  migrateBotConfig,
 } from "./types";
 import {
   savePortfolio,
@@ -36,7 +37,7 @@ import { clearCachedCreds } from "./services/clobAuth";
 import { runSmartCycle, setMaxExpiry, clearAnalyzedCache } from "./services/smartTrader";
 import { loadCostTracker, resetCostTracker } from "./services/claudeAI";
 import { getBankrollStatus, canTrade } from "./services/kellyStrategy";
-import { dbGetBotState, dbSetBotState, dbAddActivity, dbGetActivities, dbAddActivitiesBatch, dbLoadPortfolio, dbSetInitialBalance, dbGetLastCycleTimestamp } from "./services/db";
+import { dbGetBotState, dbSetBotState, dbAddActivity, dbGetActivities, dbAddActivitiesBatch, dbLoadPortfolio, dbSetInitialBalance, dbGetLastCycleTimestamp, dbSaveBotConfig, dbLoadBotConfig } from "./services/db";
 import { loadPortfolioFromDB } from "./services/paperTrading";
 
 // One-time: clear stale CLOB credentials so fresh derive runs
@@ -97,6 +98,15 @@ function App() {
         setPortfolio(dbPortfolio);
         updateStatsFromPortfolio(dbPortfolio);
 
+        // Step 2: Load bot config from bot_kv (ai_provider, ai_model, api_keys, etc.)
+        const savedConfig = await dbLoadBotConfig();
+        if (savedConfig) {
+          const merged = migrateBotConfig(savedConfig);
+          setConfig(merged);
+          setMaxExpiry(merged.max_expiry_hours || 72);
+          console.log("[App] Config loaded from bot_kv:", merged.ai_provider, merged.ai_model);
+        }
+
         // Step 3: Load AI cost tracker from DB (full history with prompt/response)
         const fullTracker = await loadCostTracker();
         setAiCostTracker(fullTracker);
@@ -115,8 +125,8 @@ function App() {
         }
 
         console.log("[App] DB state loaded successfully");
-        // Apply config to smartTrader (use default 24 if field missing from saved config)
-        setMaxExpiry(config.max_expiry_hours || 72);
+        // Apply config to smartTrader (fallback if no saved config)
+        if (!savedConfig) setMaxExpiry(config.max_expiry_hours || 72);
       } catch (e) {
         console.error("[App] DB load FAILED — keeping current state (NOT resetting):", e);
         // CRITICAL: Do NOT call setPortfolio(defaultPortfolio) here!
@@ -555,6 +565,13 @@ function App() {
     setConfig(newConfig);
     setShowSettings(false);
     setMaxExpiry(newConfig.max_expiry_hours);
+
+    // Persistir config completa en bot_kv (ai_provider, ai_model, api_keys, etc.)
+    try {
+      await dbSaveBotConfig(newConfig);
+    } catch (e) {
+      console.error("[App] Failed to save bot config to bot_kv:", e);
+    }
 
     // If initial_balance changed, apply to DB + reset portfolio with new bankroll
     if (newConfig.initial_balance !== oldConfig.initial_balance) {
