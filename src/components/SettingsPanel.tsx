@@ -812,14 +812,14 @@ function ModelCard({
         </span>
         <span className="text-[11px] text-bot-muted/40">
           ~
-          <span className="text-bot-green/80 font-mono">
-            ${costPerCycle.toFixed(4)}
+          <span className={`font-mono ${isFreeTier ? "text-emerald-400/80" : "text-bot-green/80"}`}>
+            {isFreeTier ? "$0" : `$${costPerCycle.toFixed(2)}`}
           </span>
           /ciclo
         </span>
         <span className="text-[11px] text-bot-muted/40">
           ~
-          <span className={`font-mono ${isFreeTier ? "text-emerald-400/80" : "text-bot-cyan/80"}`}>
+          <span className={`font-mono font-bold ${isFreeTier ? "text-emerald-400/80" : monthlyCost > 50 ? "text-red-400/80" : monthlyCost > 10 ? "text-amber-400/80" : "text-bot-cyan/80"}`}>
             {isFreeTier ? "$0" : `$${monthlyCost.toFixed(2)}`}
           </span>
           /mes

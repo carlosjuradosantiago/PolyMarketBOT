@@ -173,21 +173,36 @@ export function calculateModelCost(
   return (inputTokens / 1_000_000) * model.inputPrice + (outputTokens / 1_000_000) * model.outputPrice;
 }
 
-/** Estimate cost per cycle for a model (rough: ~1500 input tokens, ~800 output per batch) */
+/**
+ * Average tokens per cycle based on real usage data (Feb 17-21, 2026).
+ * Bot does ~5 API calls per cycle analyzing 8 markets in batches.
+ * Each call sends massive market data prompts (~150K-220K input tokens).
+ * 
+ * Real averages from ai_usage_history:
+ *   Feb 17: 1,109,953 in / 6,060 out ($3.42)
+ *   Feb 18: 1,108,517 in / 6,882 out ($3.43)
+ *   Feb 19: 1,192,361 in / 6,545 out ($3.68)
+ *   Feb 21:   886,546 in / 5,882 out ($2.75)
+ *   Average: ~1,074,344 in / ~6,342 out per cycle
+ */
+const AVG_INPUT_TOKENS_PER_CYCLE  = 1_074_344;
+const AVG_OUTPUT_TOKENS_PER_CYCLE = 6_342;
+
+/** Estimate cost per cycle for a model (based on real usage averages) */
 export function estimateCycleCost(model: AIModelDef): number {
-  return ((model.inputPrice * 1500 + model.outputPrice * 800) / 1_000_000);
+  if (model.freeTier) return 0;
+  return (model.inputPrice * AVG_INPUT_TOKENS_PER_CYCLE + model.outputPrice * AVG_OUTPUT_TOKENS_PER_CYCLE) / 1_000_000;
 }
 
 /**
  * Estimate monthly cost for a model.
- * Bot runs 1 cycle/day, each cycle = 2 batches (~1500 in + ~800 out per batch).
- * Monthly = batchCost × 2 batches × 30 days = batchCost × 60
+ * Bot runs 1 cycle/day via pg_cron (0 11 * * *).
+ * Monthly = cycleCost × 30 days.
  * Free tier models return 0.
  */
 export function estimateMonthlyCost(model: AIModelDef): number {
   if (model.freeTier) return 0;
-  const batchCost = (model.inputPrice * 1500 + model.outputPrice * 800) / 1_000_000;
-  return batchCost * 2 * 30; // 2 batches/cycle × 30 days
+  return estimateCycleCost(model) * 30;
 }
 
 /** Check if a model has free tier */
