@@ -21,22 +21,27 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const apiKey = Deno.env.get("CLAUDE_API_KEY");
-  if (!apiKey) {
-    console.error("[Claude Proxy] CLAUDE_API_KEY secret not configured");
-    return new Response(JSON.stringify({ error: "CLAUDE_API_KEY not configured" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
   try {
     const body = await req.json();
 
+    // Accept API key from request body (user-provided) or fallback to env secret
+    const apiKey = body.apiKey || Deno.env.get("CLAUDE_API_KEY");
+    if (!apiKey) {
+      console.error("[Claude Proxy] No API key available (neither body.apiKey nor CLAUDE_API_KEY secret)");
+      return new Response(JSON.stringify({ error: "CLAUDE_API_KEY not configured. Ingresa tu API key en Settings." }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Remove apiKey from payload before forwarding to Anthropic
+    const { apiKey: _removed, ...claudePayload } = body;
+
     // Log request info for debugging
-    const model = body?.model || "unknown";
-    const toolNames = (body?.tools || []).map((t: any) => t.type || t.name).join(", ");
-    console.log(`[Claude Proxy] model=${model}, tools=[${toolNames}], max_tokens=${body?.max_tokens}`);
+    const model = claudePayload?.model || "unknown";
+    const toolNames = (claudePayload?.tools || []).map((t: any) => t.type || t.name).join(", ");
+    const keySource = body.apiKey ? "body" : "env";
+    console.log(`[Claude Proxy] model=${model}, tools=[${toolNames}], max_tokens=${claudePayload?.max_tokens}, key=${keySource}`);
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -45,7 +50,7 @@ Deno.serve(async (req: Request) => {
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(claudePayload),
     });
 
     const data = await response.json();

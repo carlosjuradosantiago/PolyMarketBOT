@@ -384,6 +384,7 @@ export async function analyzeMarketsWithClaude(
   bankroll: number,
   model?: string,
   history?: PerformanceHistory,
+  apiKey?: string,
 ): Promise<ClaudeResearchResult> {
   const modelId = model || "claude-sonnet-4-20250514";
 
@@ -413,6 +414,7 @@ export async function analyzeMarketsWithClaude(
       "apikey": SUPABASE_KEY,
     },
     body: JSON.stringify({
+      ...(apiKey ? { apiKey } : {}),
       model: modelId,
       max_tokens: 16384,
       temperature: 0.3,

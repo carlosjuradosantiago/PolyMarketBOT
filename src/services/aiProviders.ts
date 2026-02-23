@@ -11,6 +11,8 @@ export type AIProviderType = "anthropic" | "google" | "openai" | "xai" | "deepse
 
 export interface FreeTierInfo {
   dailyRequests: number;
+  tokensPerMinute?: number;   // TPM limit (e.g. Gemini 2.5 Flash = 250k)
+  minIntervalMs?: number;     // minimum ms between requests to respect TPM
   description: string;
 }
 
@@ -78,7 +80,7 @@ export const AI_PROVIDERS: AIProviderDef[] = [
     webSearchMethod: "Google Search grounding",
     models: [
       { id: "gemini-2.0-flash",  name: "Gemini 2.0 Flash",  provider: "google", tag: "Free Tier",    inputPrice: 0.10, outputPrice: 0.40, hasWebSearch: true, contextWindow: 1000000, maxOutput: 8192, freeTier: { dailyRequests: 1500, description: "1,500 req/día gratis" } },
-      { id: "gemini-2.5-flash",  name: "Gemini 2.5 Flash",  provider: "google", tag: "⭐ Mejor Free", inputPrice: 0.15, outputPrice: 0.60, hasWebSearch: true, contextWindow: 1000000, maxOutput: 65536, freeTier: { dailyRequests: 500, description: "500 req/día gratis" }, note: "Thinking tokens: $3.50/M output" },
+      { id: "gemini-2.5-flash",  name: "Gemini 2.5 Flash",  provider: "google", tag: "⭐ Mejor Free", inputPrice: 0.15, outputPrice: 0.60, hasWebSearch: true, contextWindow: 1000000, maxOutput: 65536, freeTier: { dailyRequests: 500, tokensPerMinute: 250_000, minIntervalMs: 90_000, description: "500 req/día, 250k TPM" }, note: "Thinking tokens: $3.50/M output" },
       { id: "gemini-2.5-pro",    name: "Gemini 2.5 Pro",    provider: "google", tag: "Pro",          inputPrice: 1.25, outputPrice: 10,   hasWebSearch: true, contextWindow: 1000000, maxOutput: 65536, freeTier: { dailyRequests: 25, description: "25 req/día gratis" }, note: ">200K ctx: $2.50/$15 per M" },
     ],
   },

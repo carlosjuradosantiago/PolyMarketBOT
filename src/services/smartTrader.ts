@@ -549,6 +549,7 @@ export async function runSmartCycle(
   claudeModel?: string,
   aiProvider?: AIProviderType,
   aiModel?: string,
+  apiKeys?: Partial<Record<AIProviderType, string>>,
 ): Promise<SmartCycleResult> {
   // ─── Cycle Lock: prevent concurrent execution ─────
   // Check BOTH in-memory flag AND localStorage (survives reload)
@@ -564,7 +565,7 @@ export async function runSmartCycle(
   _setCycleLock();
 
   try {
-    return await _runSmartCycleInner(portfolio, allMarkets, claudeModel, aiProvider, aiModel);
+    return await _runSmartCycleInner(portfolio, allMarkets, claudeModel, aiProvider, aiModel, apiKeys);
   } finally {
     _cycleRunning = false;
     _clearCycleLock();
@@ -577,6 +578,7 @@ async function _runSmartCycleInner(
   claudeModel?: string,
   aiProvider?: AIProviderType,
   aiModel?: string,
+  apiKeys?: Partial<Record<AIProviderType, string>>,
 ): Promise<SmartCycleResult> {
   const activities: ActivityEntry[] = [];
   const betsPlaced: KellyResult[] = [];
@@ -839,6 +841,7 @@ async function _runSmartCycleInner(
       // Use unified AI service (routes to correct provider)
       const effectiveProvider = aiProvider || "anthropic";
       const effectiveModel = aiModel || claudeModel || "claude-sonnet-4-20250514";
+      const effectiveApiKey = apiKeys?.[effectiveProvider];
       aiResult = await analyzeMarketsWithAI(
         effectiveProvider,
         effectiveModel,
@@ -846,6 +849,7 @@ async function _runSmartCycleInner(
         updatedPortfolio.openOrders,
         updatedPortfolio.balance,
         perfHistory,
+        effectiveApiKey,
       );
 
       lastAiResult = aiResult;

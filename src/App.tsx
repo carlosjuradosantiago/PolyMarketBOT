@@ -316,6 +316,7 @@ function App() {
         config.claude_model,
         config.ai_provider,
         config.ai_model,
+        config.ai_api_keys,
       );
 
       // Update portfolio if bets were placed

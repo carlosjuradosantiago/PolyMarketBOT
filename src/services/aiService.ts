@@ -30,12 +30,59 @@ function localTimestamp(): string {
   return new Date().toISOString();
 }
 
+// ─── Rate Limiter (Gemini 250k TPM free tier) ──────
+// Gemini 2.5 Flash free tier: 250k tokens/min → una sola llamada de ~300k puede chocar.
+// Enforce mínimo 90s (1.5min) entre peticiones a Gemini para respetar TPM.
+
+let _lastProviderCallTime: Record<string, number> = {};
+
+function _loadProviderCallTimes() {
+  try {
+    const stored = localStorage.getItem('_aiService_providerCallTimes');
+    if (stored) _lastProviderCallTime = JSON.parse(stored);
+  } catch { /* ignore */ }
+}
+_loadProviderCallTimes();
+
+function _persistProviderCallTime(key: string, time: number) {
+  _lastProviderCallTime[key] = time;
+  try {
+    localStorage.setItem('_aiService_providerCallTimes', JSON.stringify(_lastProviderCallTime));
+  } catch { /* localStorage full — ignore */ }
+}
+
+/**
+ * Enforce rate limit for providers with TPM constraints (Gemini free tier).
+ * Returns the wait time in ms, or 0 if no wait needed.
+ */
+async function enforceRateLimit(provider: AIProviderType, modelId: string): Promise<void> {
+  const model = getModel(provider, modelId);
+  const minInterval = model?.freeTier?.minIntervalMs;
+  if (!minInterval) return; // No rate limit for this model
+
+  const key = `${provider}:${modelId}`;
+  const lastCall = _lastProviderCallTime[key] || 0;
+  const now = Date.now();
+  const elapsed = now - lastCall;
+
+  if (lastCall > 0 && elapsed < minInterval) {
+    const waitMs = minInterval - elapsed;
+    const waitSecs = Math.ceil(waitMs / 1000);
+    log(`⏳ Rate limit ${provider}/${modelId}: esperando ${waitSecs}s (TPM ${model.freeTier!.tokensPerMinute?.toLocaleString()} free tier)...`);
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+
+  _persistProviderCallTime(key, Date.now());
+}
+
 // ─── Main Entry Point ──────────────────────────────
 
 /**
  * Analyze markets using the selected AI provider and model.
  * For Anthropic, delegates to the existing `analyzeMarketsWithClaude`.
  * For other providers, uses provider-specific adapters.
+ * 
+ * @param apiKey — API key from user's frontend config (not server secrets)
  */
 export async function analyzeMarketsWithAI(
   provider: AIProviderType,
@@ -44,14 +91,18 @@ export async function analyzeMarketsWithAI(
   openOrders: PaperOrder[],
   bankroll: number,
   history?: PerformanceHistory,
+  apiKey?: string,
 ): Promise<ClaudeResearchResult> {
+  // Enforce rate limits (Gemini 250k TPM, etc.)
+  await enforceRateLimit(provider, modelId);
+
   // For Anthropic, use the battle-tested existing implementation
   if (provider === "anthropic") {
-    return analyzeMarketsWithClaude(markets, openOrders, bankroll, modelId, history);
+    return analyzeMarketsWithClaude(markets, openOrders, bankroll, modelId, history, apiKey);
   }
 
   // For other providers, use the unified adapter
-  return analyzeWithProvider(provider, modelId, markets, openOrders, bankroll, history);
+  return analyzeWithProvider(provider, modelId, markets, openOrders, bankroll, history, apiKey);
 }
 
 // ─── Generic Provider Adapter ──────────────────────
@@ -63,6 +114,7 @@ async function analyzeWithProvider(
   openOrders: PaperOrder[],
   bankroll: number,
   history?: PerformanceHistory,
+  apiKey?: string,
 ): Promise<ClaudeResearchResult> {
   const model = getModel(provider, modelId);
   if (!model) {
@@ -95,6 +147,11 @@ async function analyzeWithProvider(
 
   // Build request body per provider
   const requestBody = buildRequestBody(provider, modelId, prompt, model.hasWebSearch, model.maxOutput);
+
+  // Include user's API key in request body (proxy extracts it and removes before forwarding)
+  if (apiKey) {
+    requestBody.apiKey = apiKey;
+  }
 
   log(`📡 [${provider}/${modelId}] Enviando ${markets.length} mercados...`);
   log(`Prompt: ~${prompt.length} chars (~${Math.round(prompt.length / 4)} tokens est.)`);
