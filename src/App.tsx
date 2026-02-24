@@ -311,6 +311,27 @@ function App() {
     };
   }, []);
 
+  // Safety net: si isAnalyzing queda stuck >5 min, forzar reset desde DB
+  useEffect(() => {
+    if (!isAnalyzing) return;
+    const ANALYZING_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutos
+    const timer = setTimeout(async () => {
+      console.warn("[App] Analyzing stuck >5min — force-refreshing from DB");
+      const botState = await dbGetBotState();
+      if (!botState.analyzing) {
+        setIsAnalyzing(false);
+        setIsManualRunning(false);
+      } else {
+        // Si la DB también dice analyzing=true, forzar reset
+        console.warn("[App] DB also stuck analyzing=true — forcing reset");
+        await supabase.from("bot_state").update({ analyzing: false }).eq("id", 1);
+        setIsAnalyzing(false);
+        setIsManualRunning(false);
+      }
+    }, ANALYZING_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [isAnalyzing]);
+
   // ═══════════════════════════════════════════════════
   // HANDLERS — Delegados a Edge Functions
   // ═══════════════════════════════════════════════════

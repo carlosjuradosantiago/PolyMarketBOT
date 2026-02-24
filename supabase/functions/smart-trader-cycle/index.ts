@@ -1657,6 +1657,16 @@ Deno.serve(async (req) => {
     activities.push({ timestamp: new Date().toISOString(), message: msg, entry_type: type });
   }
 
+  // Helper: resetear analyzing en DB para runs manuales (cualquier salida temprana)
+  async function resetManualAnalyzing(errorMsg?: string) {
+    if (!isManual) return;
+    try {
+      const upd: Record<string, unknown> = { analyzing: false, last_cycle_at: new Date().toISOString() };
+      if (errorMsg) upd.last_error = errorMsg.slice(0, 500);
+      await supabase.from("bot_state").update(upd).eq("id", 1);
+    } catch { /* ignore */ }
+  }
+
   // ─── Detectar modo manual y chain mode ────────────────────
   let isManual = false;
   let isChainBatch = false; // true = batch intermedio de cadena, no resetear analyzing al final
@@ -1666,22 +1676,21 @@ Deno.serve(async (req) => {
     isChainBatch = body?.chainBatch === true; // Frontend indica que hay más batches por venir
   } catch { /* no body or invalid JSON — automatic mode */ }
 
-  // Si es manual: marcar analyzing=true y limpiar throttle/lock
+  // Si es manual: marcar analyzing=true y limpiar throttle/lock/analyzed_map
   if (isManual) {
-    log("🔧 Modo MANUAL activado — limpiando throttle y lock");
+    log("🔧 Modo MANUAL activado — limpiando throttle, lock y analyzed_map");
     await supabase.from("bot_state").update({
       analyzing: true,
       last_error: null,
       last_cycle_at: new Date().toISOString(),
     }).eq("id", 1);
-    await supabase.from("bot_kv").upsert(
-      { key: "last_claude_call_time", value: "0", updated_at: new Date().toISOString() },
-      { onConflict: "key" },
-    );
-    await supabase.from("bot_kv").upsert(
-      { key: "cycle_lock", value: "0", updated_at: new Date().toISOString() },
-      { onConflict: "key" },
-    );
+    const now = new Date().toISOString();
+    await supabase.from("bot_kv").upsert([
+      { key: "last_claude_call_time", value: "0", updated_at: now },
+      { key: "cycle_lock", value: "0", updated_at: now },
+      // Limpiar analyzed_map para que el manual analice TODOS los mercados frescos
+      ...(isChainBatch ? [] : [{ key: "analyzed_map", value: "[]", updated_at: now }]),
+    ], { onConflict: "key" });
   }
 
   try {
@@ -1701,6 +1710,7 @@ Deno.serve(async (req) => {
     // ─── Cycle Lock ──────────────────────────────
     if (await checkCycleLock()) {
       log("⚠️ Cycle lock active — skipping (another cycle is running)");
+      await resetManualAnalyzing("Cycle lock active");
       return new Response(JSON.stringify({ ok: false, reason: "Cycle lock active" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -1734,6 +1744,7 @@ Deno.serve(async (req) => {
         log(msg);
         act(msg, "Warning");
         await dbAddActivitiesBatch(activities);
+        await resetManualAnalyzing();
         return new Response(JSON.stringify({ ok: true, reason: msg }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -1749,6 +1760,7 @@ Deno.serve(async (req) => {
         log(msg);
         act(msg, "Error");
         await dbAddActivitiesBatch(activities);
+        await resetManualAnalyzing(msg);
         return new Response(JSON.stringify({ ok: false, reason: msg }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -1807,6 +1819,7 @@ Deno.serve(async (req) => {
           results: [], betsPlaced: 0, nextScanSecs: SCAN_INTERVAL_SECS, error: msg,
         });
         await dbAddActivitiesBatch(activities);
+        await resetManualAnalyzing();
         return new Response(JSON.stringify({ ok: true, reason: msg }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -1837,6 +1850,7 @@ Deno.serve(async (req) => {
         const msg = `💸 AI cost estimate $${estCost.toFixed(2)} > 5% of bankroll — skipping`;
         log(msg); act(msg, "Warning");
         await dbAddActivitiesBatch(activities);
+        await resetManualAnalyzing();
         return new Response(JSON.stringify({ ok: true, reason: msg }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -2101,16 +2115,8 @@ Deno.serve(async (req) => {
     act(`❌ FATAL: ${errMsg.slice(0, 200)}`, "Error");
     await dbAddActivitiesBatch(activities);
     try { await clearCycleLock(); } catch { /* */ }
-    // Si es manual y NO es batch intermedio, resetear analyzing
-    if (isManual && !isChainBatch) {
-      try {
-        await supabase.from("bot_state").update({
-          analyzing: false,
-          last_error: errMsg.slice(0, 500),
-          last_cycle_at: new Date().toISOString(),
-        }).eq("id", 1);
-      } catch { /* */ }
-    }
+    // Siempre resetear analyzing en runs manuales (incluyendo chain batches)
+    await resetManualAnalyzing(errMsg);
     return new Response(JSON.stringify({ ok: false, error: errMsg }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
