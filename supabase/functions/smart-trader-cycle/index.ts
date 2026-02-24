@@ -69,7 +69,7 @@ const corsHeaders = {
 
 const MAX_EXPIRY_MS = 120 * 60 * 60 * 1000; // 5 days
 const SCAN_INTERVAL_SECS = 86400;
-const MIN_CLAUDE_INTERVAL_MS = 20 * 60 * 60 * 1000; // 20 hours
+const MIN_CLAUDE_INTERVAL_MS = 20 * 1000; // 20 seconds between AI requests
 const BATCH_SIZE = 4;
 const MAX_BATCHES_PER_CYCLE = 1; // 1 batch to stay safely under 150s Edge Function timeout
 const MAX_ANALYZED_PER_CYCLE = 4; // 1 batch × 4
