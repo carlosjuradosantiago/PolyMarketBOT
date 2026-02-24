@@ -251,7 +251,7 @@ function App() {
     if (portfolio.openOrders.length > 0) loadPaperPrices();
   }, [portfolio.openOrders.length, loadPaperPrices]);
 
-  // Countdown hasta próximo ciclo (cron 6:00 AM Colombia = 11:00 UTC)
+  // Countdown hasta próximo ciclo (cron 9:00 AM Colombia = 14:00 UTC)
   useEffect(() => {
     if (!isRunning) {
       setCountdown(0);
@@ -262,8 +262,8 @@ function App() {
       const utcMs = now.getTime() + now.getTimezoneOffset() * 60_000;
       const col = new Date(utcMs - 5 * 3600_000);
       const target = new Date(col);
-      target.setHours(6, 0, 0, 0);
-      if (col.getHours() >= 6) target.setDate(target.getDate() + 1);
+      target.setHours(9, 0, 0, 0);
+      if (col.getHours() >= 9) target.setDate(target.getDate() + 1);
       const diffMs = target.getTime() - col.getTime();
       setCountdown(Math.max(0, Math.ceil(diffMs / 1000)));
     };

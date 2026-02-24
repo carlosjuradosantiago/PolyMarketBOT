@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
 // Supabase Edge Function — Smart Trader Autonomous Cycle
-// Triggered by pg_cron daily at 11:00 UTC (6am UTC-5 Colombia)
+// Triggered by pg_cron daily at 14:00 UTC (9am UTC-5 Colombia)
 //
 // Self-contained: fetches markets, analyzes with Claude, places paper
 // orders — ALL server-side, no browser dependency.
@@ -374,12 +374,16 @@ async function getThrottleState(): Promise<{ lastClaudeCallTime: number; analyze
   }
 }
 
-async function saveThrottleState(lastClaudeCallTime: number, analyzedMap: Map<string, number>): Promise<void> {
+async function saveThrottleState(lastClaudeCallTime: number, analyzedMap: Map<string, number>, skipTimestamp = false): Promise<void> {
   try {
-    await supabase.from("bot_kv").upsert([
-      { key: "last_claude_call_time", value: String(lastClaudeCallTime), updated_at: new Date().toISOString() },
+    const rows: { key: string; value: string; updated_at: string }[] = [
       { key: "analyzed_map", value: JSON.stringify([...analyzedMap.entries()]), updated_at: new Date().toISOString() },
-    ], { onConflict: "key" });
+    ];
+    // Solo guardar timestamp para ciclos automáticos — runs manuales NO bloquean el cron diario
+    if (!skipTimestamp) {
+      rows.push({ key: "last_claude_call_time", value: String(lastClaudeCallTime), updated_at: new Date().toISOString() });
+    }
+    await supabase.from("bot_kv").upsert(rows, { onConflict: "key" });
   } catch (e) {
     log("⚠️ Failed to save throttle state:", e);
   }
@@ -1709,9 +1713,10 @@ Deno.serve(async (req) => {
       const now = Date.now();
       const timeSinceLastClaude = now - lastClaudeCallTime;
 
-      if (lastClaudeCallTime > 0 && timeSinceLastClaude < MIN_CLAUDE_INTERVAL_MS) {
+      // Throttle solo aplica a ciclos automáticos — manual puede correr cuando quiera
+      if (!isManual && lastClaudeCallTime > 0 && timeSinceLastClaude < MIN_CLAUDE_INTERVAL_MS) {
         const secsLeft = Math.ceil((MIN_CLAUDE_INTERVAL_MS - timeSinceLastClaude) / 1000);
-        const msg = `⏳ Throttle: next analysis in ${Math.ceil(secsLeft / 60)}min (20h minimum between cycles)`;
+        const msg = `⏳ Throttle: next analysis in ${Math.ceil(secsLeft / 60)}min (24h minimum between auto cycles)`;
         log(msg);
         act(msg);
         await dbAddActivitiesBatch(activities);
@@ -2031,7 +2036,8 @@ Deno.serve(async (req) => {
       }
 
       // ─── Save throttle state ─────────────────────
-      await saveThrottleState(Date.now(), newAnalyzedMap);
+      // Manual runs: guardar analyzed_map pero NO el timestamp (no bloquea auto cron)
+      await saveThrottleState(Date.now(), newAnalyzedMap, isManual);
 
       // ─── Summary ──────────────────────────────────
       debugLog.betsPlaced = totalBetsThisCycle;
