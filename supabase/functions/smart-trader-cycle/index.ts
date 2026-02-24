@@ -70,11 +70,10 @@ const corsHeaders = {
 const MAX_EXPIRY_MS = 120 * 60 * 60 * 1000; // 5 days
 const SCAN_INTERVAL_SECS = 86400;
 const MIN_CLAUDE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours between cycles
-const BATCH_DELAY_MS = 10 * 1000; // 10 seconds between AI batch requests
-const BATCH_SIZE = 4;
-const MAX_BATCHES_PER_CYCLE = 5; // 5 batches per cycle
-const MAX_ANALYZED_PER_CYCLE = 20; // 5 batches × 4
-const SAFETY_TIMEOUT_MS = 125_000; // Stop sending batches if >125s elapsed (Edge limit=150s)
+const BATCH_DELAY_MS = 0; // No delay — 1 batch per invocation, frontend chains calls
+const BATCH_SIZE = 5; // 5 markets per batch (single batch per invocation)
+const MAX_BATCHES_PER_CYCLE = 1; // 1 batch per invocation — frontend chains multiple calls
+const MAX_ANALYZED_PER_CYCLE = 5; // 1 batch × 5 markets
 const MIN_POOL_TARGET = 15;
 const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted, use Gemini as default
 
@@ -1628,11 +1627,13 @@ Deno.serve(async (req) => {
     activities.push({ timestamp: new Date().toISOString(), message: msg, entry_type: type });
   }
 
-  // ─── Detectar modo manual ────────────────────
+  // ─── Detectar modo manual y chain mode ────────────────────
   let isManual = false;
+  let isChainBatch = false; // true = batch intermedio de cadena, no resetear analyzing al final
   try {
     const body = await req.json();
     isManual = body?.manual === true;
+    isChainBatch = body?.chainBatch === true; // Frontend indica que hay más batches por venir
   } catch { /* no body or invalid JSON — automatic mode */ }
 
   // Si es manual: marcar analyzing=true y limpiar throttle/lock
@@ -1793,7 +1794,10 @@ Deno.serve(async (req) => {
       for (let i = 0; i < diversified.length && batches.length < MAX_BATCHES_PER_CYCLE; i += BATCH_SIZE) {
         batches.push(diversified.slice(i, i + BATCH_SIZE));
       }
-      log(`📦 ${diversified.length} selected → ${batches.length} batch(es) of ≤${BATCH_SIZE}`);
+      // Calcular cuántos mercados frescos quedan después de este batch
+      const remainingFreshMarkets = pool.filter(m => !analyzedMap.has(m.id)).length - diversified.length;
+      const hasMoreMarkets = remainingFreshMarkets > 0;
+      log(`📦 ${diversified.length} selected → ${batches.length} batch(es) of ≤${BATCH_SIZE} | ${remainingFreshMarkets} fresh markets remaining`);
 
       // shouldAnalyze cost check
       const batchCount = Math.ceil(diversified.length / 4);
@@ -1839,17 +1843,8 @@ Deno.serve(async (req) => {
       const cycleStartMs = Date.now();
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
-        // Safety timeout: no enviar más batches si nos acercamos al límite de 150s
-        const elapsedMs = Date.now() - cycleStartMs;
-        if (elapsedMs > SAFETY_TIMEOUT_MS) {
-          log(`⚠️ Safety timeout: ${Math.round(elapsedMs / 1000)}s elapsed, skipping remaining ${batches.length - batchIdx} batch(es)`);
-          break;
-        }
-        // Delay entre batches (no antes del primero)
-        if (batchIdx > 0) {
-          log(`⏳ Esperando ${BATCH_DELAY_MS / 1000}s antes del siguiente batch...`);
-          await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
-        }
+        // Con 1 batch por invocación no necesitamos safety timeout ni delay
+        // El frontend encadena múltiples llamadas independientes
         const batch = batches[batchIdx];
         const batchLabel = `Batch ${batchIdx + 1}/${batches.length}`;
         log(`\n═══ ${batchLabel}: ${batch.length} markets ═══`);
@@ -2030,9 +2025,13 @@ Deno.serve(async (req) => {
       try {
         const { data: bs } = await supabase.from("bot_state").select("cycle_count").eq("id", 1).single();
         const updates: Record<string, unknown> = { cycle_count: (bs?.cycle_count || 0) + 1 };
-        if (isManual) {
+        if (isManual && !isChainBatch) {
+          // Solo resetear analyzing en el último batch de la cadena (o si no es cadena)
           updates.analyzing = false;
           updates.last_error = null;
+          updates.last_cycle_at = new Date().toISOString();
+        } else if (isManual && isChainBatch) {
+          // Batch intermedio: mantener analyzing=true, actualizar timestamp
           updates.last_cycle_at = new Date().toISOString();
         }
         await supabase.from("bot_state").update(updates).eq("id", 1);
@@ -2042,6 +2041,7 @@ Deno.serve(async (req) => {
       log("────────────────────────────────────────────────");
       log(`📋 SUMMARY: ${totalBetsThisCycle} bets / ${totalRecommendations} recs / ${pool.length} in pool`);
       log(`💸 Cycle cost: ${formatCost(totalAICostCycle)} | Time: ${elapsed}ms`);
+      if (hasMoreMarkets) log(`🔗 hasMoreMarkets=true — frontend can chain another call`);
       log("────────────────────────────────────────────────");
 
       return new Response(JSON.stringify({
@@ -2053,6 +2053,7 @@ Deno.serve(async (req) => {
         costUsd: totalAICostCycle,
         elapsedMs: elapsed,
         balance: updatedPortfolio.balance,
+        hasMoreMarkets,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -2067,8 +2068,8 @@ Deno.serve(async (req) => {
     act(`❌ FATAL: ${errMsg.slice(0, 200)}`, "Error");
     await dbAddActivitiesBatch(activities);
     try { await clearCycleLock(); } catch { /* */ }
-    // Si es manual, actualizar bot_state
-    if (isManual) {
+    // Si es manual y NO es batch intermedio, resetear analyzing
+    if (isManual && !isChainBatch) {
       try {
         await supabase.from("bot_state").update({
           analyzing: false,

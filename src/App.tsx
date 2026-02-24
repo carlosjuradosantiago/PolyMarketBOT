@@ -41,6 +41,7 @@ import {
 // ── Edge Functions para MUTACIONES ──
 import {
   callRunCycle,
+  callRunCycleChain,
   callStopBot,
   callResetBot,
 } from "./services/edgeFunctions";
@@ -332,22 +333,67 @@ function App() {
     await refreshData();
   }, [refreshData]);
 
-  /** Forzar ciclo manual via Edge Function (bypass cron + throttle) */
+  /** Forzar ciclo manual via Edge Function — encadena hasta 5 batches independientes */
   const handleForceRun = useCallback(async () => {
     if (isManualRunning || isAnalyzing) return;
     setIsManualRunning(true);
     setIsAnalyzing(true);
+
+    const MAX_CHAIN_BATCHES = 5;
+    const PER_CALL_TIMEOUT_MS = 155_000; // 155s safety — Edge Function muere a 150s
+    let totalBets = 0;
+    let totalRecs = 0;
+    let totalCost = 0;
+    let batchesDone = 0;
+
     try {
-      const result = await callRunCycle();
-      if (result.error) {
-        console.error("[App] Error en ciclo manual:", result.error);
-      } else {
-        console.log("[App] Ciclo completado:", result);
+      for (let i = 0; i < MAX_CHAIN_BATCHES; i++) {
+        const isLastBatch = i === MAX_CHAIN_BATCHES - 1;
+        const callFn = isLastBatch ? callRunCycle : callRunCycleChain;
+
+        console.log(`[App] Batch ${i + 1}/${MAX_CHAIN_BATCHES} — ${isLastBatch ? 'FINAL' : 'chain'}...`);
+
+        // Llamada con timeout de seguridad
+        const result = await Promise.race([
+          callFn(),
+          new Promise<{ ok: false; error: string; timedOut: true }>((resolve) =>
+            setTimeout(() => resolve({ ok: false, error: "Timeout: la función no respondió en 155s", timedOut: true }), PER_CALL_TIMEOUT_MS)
+          ),
+        ]);
+
+        batchesDone++;
+
+        if (!result.ok) {
+          console.error(`[App] Batch ${i + 1} error:`, result.error);
+          break;
+        }
+
+        totalBets += result.betsPlaced || 0;
+        totalRecs += result.recommendations || 0;
+        totalCost += result.costUsd || 0;
+        console.log(`[App] Batch ${i + 1} OK: ${result.betsPlaced} bets, ${result.recommendations} recs, $${(result.costUsd || 0).toFixed(4)}`);
+
+        // Si no hay más mercados frescos, parar
+        if (!(result as any).hasMoreMarkets) {
+          console.log(`[App] No more fresh markets — stopping chain after ${batchesDone} batches`);
+          break;
+        }
+
+        // Pequeña pausa entre batches para no saturar
+        if (!isLastBatch) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
       }
+
+      console.log(`[App] Cadena completa: ${batchesDone} batches, ${totalBets} bets, ${totalRecs} recs, $${totalCost.toFixed(4)}`);
     } catch (e) {
-      console.error("[App] Error en ciclo manual:", e);
+      console.error("[App] Error en cadena de batches:", e);
     } finally {
       setIsManualRunning(false);
+      // Asegurar que analyzing=false en DB (safety net por si la última llamada murió)
+      try {
+        await supabase.from("bot_state").update({ analyzing: false }).eq("id", 1);
+      } catch { /* ignore */ }
       await refreshData();
     }
   }, [isManualRunning, isAnalyzing, refreshData]);
