@@ -134,3 +134,40 @@ export interface ResetBotResult extends EdgeFunctionResult {
 export async function callResetBot(initialBalance?: number): Promise<ResetBotResult> {
   return callEdgeFunction("reset-bot", "POST", initialBalance ? { initialBalance } : {}) as Promise<ResetBotResult>;
 }
+
+// ── Colocar orden manual ──
+export interface PlaceOrderResult extends EdgeFunctionResult {
+  order?: {
+    id: string;
+    totalCost: number;
+    potentialPayout: number;
+    price: number;
+    quantity: number;
+    outcome: string;
+  };
+  newBalance?: number;
+}
+
+export async function callPlaceOrder(
+  marketId: string,
+  conditionId: string,
+  marketQuestion: string,
+  marketSlug: string,
+  outcome: string,
+  outcomeIndex: number,
+  price: number,
+  amount: number,
+  endDate?: string,
+): Promise<PlaceOrderResult> {
+  return callEdgeFunction("place-order", "POST", {
+    marketId,
+    conditionId,
+    marketQuestion,
+    marketSlug,
+    outcome,
+    outcomeIndex,
+    price,
+    amount,
+    endDate,
+  }) as Promise<PlaceOrderResult>;
+}

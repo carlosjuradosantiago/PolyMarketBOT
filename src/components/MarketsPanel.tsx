@@ -18,7 +18,7 @@ import {
   formatTimeRemaining,
 } from "../services/polymarket";
 import { computeClusterKey } from "../services/marketConstants";
-import { createPaperOrder } from "../services/paperTrading";
+import { callPlaceOrder } from "../services/edgeFunctions";
 import { useTranslation } from "../i18n";
 
 interface MarketsProps {
@@ -116,8 +116,8 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
     setDisplayCount(100);
   }, [filters]);
 
-  // Handle placing a bet
-  const handlePlaceBet = () => {
+  // Handle placing a bet — llama Edge Function (backend)
+  const handlePlaceBet = async () => {
     if (!selectedMarket) return;
 
     const amount = parseFloat(betAmount);
@@ -126,39 +126,62 @@ export default function MarketsPanel({ portfolio, onPortfolioUpdate, onActivity 
       return;
     }
 
-    // ═══ HARD CAP: max 10% of equity per manual bet ═══
-    const invested = portfolio.openOrders.reduce((s, o) => s + (o.totalCost || 0), 0);
-    const equity = portfolio.balance + invested;
-    const maxBet = equity * 0.10;
-    if (amount > maxBet) {
-      onActivity(`Max bet is $${maxBet.toFixed(2)} (10% of equity $${equity.toFixed(2)})`, "Warning");
-      return;
-    }
-
     const price = parseFloat(selectedMarket.outcomePrices[betOutcome]);
-    const quantity = amount / price;
 
-    const result = createPaperOrder(
-      selectedMarket,
-      betOutcome,
-      "buy",
-      quantity,
-      portfolio
-    );
-
-    if (result.error) {
-      onActivity(result.error, "Error");
-      return;
-    }
-
-    if (result.order) {
-      onPortfolioUpdate(result.portfolio);
-      onActivity(
-        `ORDER $${result.order.totalCost.toFixed(2)} → "${selectedMarket.outcomes[betOutcome]}" @ ${formatPrice(price)}`,
-        "Order"
+    try {
+      const result = await callPlaceOrder(
+        selectedMarket.id,
+        selectedMarket.conditionId,
+        selectedMarket.question,
+        selectedMarket.slug || "",
+        selectedMarket.outcomes[betOutcome],
+        betOutcome,
+        price,
+        amount,
+        selectedMarket.endDate,
       );
-      setSelectedMarket(null);
-      setBetAmount("5");
+
+      if (!result.ok || result.error) {
+        onActivity(result.error || "Error placing order", "Error");
+        return;
+      }
+
+      if (result.order && result.newBalance !== undefined) {
+        // Actualizar portfolio con nuevo balance
+        const updatedPortfolio = {
+          ...portfolio,
+          balance: result.newBalance,
+          openOrders: [
+            {
+              id: result.order.id,
+              marketId: selectedMarket.id,
+              conditionId: selectedMarket.conditionId,
+              marketQuestion: selectedMarket.question,
+              marketSlug: selectedMarket.slug || "",
+              outcome: result.order.outcome,
+              outcomeIndex: betOutcome,
+              side: "buy" as const,
+              price: result.order.price,
+              quantity: result.order.quantity,
+              totalCost: result.order.totalCost,
+              potentialPayout: result.order.potentialPayout,
+              status: "filled" as const,
+              createdAt: new Date().toISOString(),
+              endDate: selectedMarket.endDate,
+            },
+            ...portfolio.openOrders,
+          ],
+        };
+        onPortfolioUpdate(updatedPortfolio);
+        onActivity(
+          `ORDER $${result.order.totalCost.toFixed(2)} → "${selectedMarket.outcomes[betOutcome]}" @ ${formatPrice(price)}`,
+          "Order"
+        );
+        setSelectedMarket(null);
+        setBetAmount("5");
+      }
+    } catch (err) {
+      onActivity(`Error: ${err instanceof Error ? err.message : String(err)}`, "Error");
     }
   };
 

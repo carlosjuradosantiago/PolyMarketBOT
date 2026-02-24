@@ -6,7 +6,7 @@ El bot ahora corre **100% server-side** sin depender de ningún navegador:
 
 | Componente | Ubicación | Frecuencia |
 |---|---|---|
-| `smart-trader-cycle` | Supabase Edge Function | Diario 11:00 UTC (6am COL) |
+| `smart-trader-cycle` | Supabase Edge Function | Diario 14:00 UTC (9am COL) |
 | `resolve-orders` | Supabase Edge Function | Cada 5 minutos |
 | `bot_kv` | Tabla PostgreSQL | Estado persistente |
 | `pg_cron` | PostgreSQL scheduler | Dispara ambas funciones |
@@ -55,7 +55,7 @@ npm install -g supabase
 supabase login
 
 # Vincular proyecto
-supabase link --project-ref iqsaxeeeqwswssewpkxj
+supabase link --project-ref <TU_PROJECT_REF>
 
 # Desplegar
 supabase functions deploy smart-trader-cycle --no-verify-jwt
@@ -74,8 +74,8 @@ supabase functions deploy smart-trader-cycle --no-verify-jwt
 
 ### Test manual:
 ```bash
-curl -X POST https://iqsaxeeeqwswssewpkxj.supabase.co/functions/v1/smart-trader-cycle \
-  -H "Authorization: Bearer sb_publishable_FOGtMrVR0meYouO4w0Pt3w_yTdOojWl" \
+curl -X POST https://<TU_PROJECT_REF>.supabase.co/functions/v1/smart-trader-cycle \
+  -H "Authorization: Bearer <TU_ANON_KEY>" \
   -H "Content-Type: application/json"
 ```
 
@@ -98,7 +98,7 @@ LIMIT 10;
 ## Arquitectura
 
 ```
-pg_cron (11:00 UTC diario)
+pg_cron (14:00 UTC diario)
     │
     ▼
 smart-trader-cycle (Edge Function)
@@ -155,4 +155,4 @@ SELECT * FROM bot_kv;
 1. **Claude API sin créditos** — Recargar en https://console.anthropic.com
 2. **Edge Function debe ser desplegada** — Seguir Paso 3 arriba
 
-Una vez resueltos estos dos puntos, el bot correrá solo cada día a las 6am hora Colombia, sin necesidad de abrir ningún navegador.
+Una vez resueltos estos dos puntos, el bot correrá solo cada día a las 9am hora Colombia (14:00 UTC), sin necesidad de abrir ningún navegador.
