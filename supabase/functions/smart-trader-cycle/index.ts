@@ -77,12 +77,16 @@ const MAX_ANALYZED_PER_CYCLE = 5; // 1 batch × 5 markets
 const MIN_POOL_TARGET = 15;
 const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted, use Gemini as default
 
-// Kelly
+// Kelly — defaults (Claude)
 const KELLY_FRACTION = 0.50;
-const MAX_BET_FRACTION = 0.07;
+const MAX_BET_FRACTION = 0.10;
 const MIN_BET_USD = 1.00;
-const MIN_EDGE_AFTER_COSTS = 0.12;
-const MIN_CONFIDENCE = 75;
+const MIN_EDGE_AFTER_COSTS = 0.06;
+const MIN_CONFIDENCE = 60;
+// Kelly — Gemini overrides (stricter because Gemini is over-confident)
+const GEMINI_MAX_BET_FRACTION = 0.07;
+const GEMINI_MIN_EDGE_AFTER_COSTS = 0.12;
+const GEMINI_MIN_CONFIDENCE = 75;
 const MIN_MARKET_PRICE = 0.02;
 const MAX_MARKET_PRICE = 0.98;
 const MIN_RETURN_PCT = 0.03;
@@ -1057,7 +1061,7 @@ CRITICAL REQUIREMENTS:
 2. You MUST be EXTREMELY SKEPTICAL. Most markets are efficiently priced — the market price is usually correct.
 3. Only recommend a bet when you find STRONG, CONCRETE evidence from multiple sources that the market is significantly mispriced.
 4. Your DEFAULT should be to SKIP a market. Recommending a bet is the EXCEPTION, not the rule.
-5. For a batch of 5 markets, recommending 0-2 bets is NORMAL and EXPECTED. Recommending 4-5 is almost certainly wrong.
+5. Only recommend when you find STRONG evidence from MULTIPLE sources that contradicts the market price.
 
 SKEPTICISM RULES:
 - If you can’t find at least 2 independent, dated sources that contradict the market price → SKIP.
@@ -1095,7 +1099,6 @@ If you analyze a market without searching first, the analysis is INVALID and wil
 ⚠️ SKEPTICISM MANDATE: You are being OVER-CONFIDENT in your recommendations.
 Most prediction markets are EFFICIENTLY PRICED. The crowd is usually right.
 Your job is to find the RARE cases where the crowd is wrong — and skip everything else.
-- For 5 markets, expect to recommend 0-2 bets MAX. If you recommend 3+, re-examine — you are likely over-confident.
 - REQUIRE: At least 2 concrete, dated sources that CONTRADICT the current market price.
 - If your pReal is within 10% of pMarket → the market is fairly priced → SKIP.
 - If edge > 25%, your pReal is almost certainly wrong. Recalibrate closer to pMarket.
@@ -1479,7 +1482,14 @@ function calculateKellyBet(
   bankroll: number,
   aiCostForThisBatch: number,
   marketsInBatch: number,
+  model: string = DEFAULT_MODEL,
 ): KellyResult {
+  // Provider-specific thresholds
+  const isGemini = model.toLowerCase().includes("gemini");
+  const minConfidence = isGemini ? GEMINI_MIN_CONFIDENCE : MIN_CONFIDENCE;
+  const minEdge = isGemini ? GEMINI_MIN_EDGE_AFTER_COSTS : MIN_EDGE_AFTER_COSTS;
+  const maxBetFrac = isGemini ? GEMINI_MAX_BET_FRACTION : MAX_BET_FRACTION;
+
   const side = analysis.recommendedSide;
   const skipResult: KellyResult = {
     marketId: market.id, question: market.question, edge: 0, rawKelly: 0,
@@ -1490,7 +1500,7 @@ function calculateKellyBet(
 
   if (side === "SKIP") { skipResult.reasoning = "AI recommends SKIP"; return skipResult; }
   if (bankroll < MIN_BET_USD) { skipResult.reasoning = `Bankroll $${bankroll.toFixed(2)} < mínimo $${MIN_BET_USD}`; return skipResult; }
-  if (analysis.confidence < MIN_CONFIDENCE) { skipResult.reasoning = `Confidence ${analysis.confidence} < min ${MIN_CONFIDENCE}`; return skipResult; }
+  if (analysis.confidence < minConfidence) { skipResult.reasoning = `Confidence ${analysis.confidence} < min ${minConfidence}`; return skipResult; }
 
   const checkPrices = market.outcomePrices.map(p => parseFloat(p));
   const targetPrice = side === "YES" ? (checkPrices[0] || 0.5) : (checkPrices[1] || 0.5);
@@ -1526,7 +1536,7 @@ function calculateKellyBet(
   const aiCostPerBet = aiCostForThisBatch / Math.max(1, marketsInBatch);
   const rawKelly = rawKellyFraction(pReal, pMarket);
   const fractional = rawKelly * KELLY_FRACTION;
-  const cappedFraction = Math.min(fractional, MAX_BET_FRACTION);
+  const cappedFraction = Math.min(fractional, maxBetFrac);
   let betAmount = bankroll * cappedFraction;
 
   // Lottery position cap
@@ -1538,12 +1548,12 @@ function calculateKellyBet(
   if (betAmount < MIN_BET_USD) { skipResult.edge = grossEdge; skipResult.rawKelly = rawKelly; skipResult.reasoning = `Bet $${betAmount.toFixed(2)} < min $${MIN_BET_USD}`; return skipResult; }
 
   const netEdge = grossEdge - (aiCostPerBet / betAmount);
-  if (netEdge < MIN_EDGE_AFTER_COSTS) { skipResult.edge = grossEdge; skipResult.rawKelly = rawKelly; skipResult.reasoning = `Net edge ${(netEdge * 100).toFixed(1)}% < ${(MIN_EDGE_AFTER_COSTS * 100).toFixed(1)}%`; return skipResult; }
+  if (netEdge < minEdge) { skipResult.edge = grossEdge; skipResult.rawKelly = rawKelly; skipResult.reasoning = `Net edge ${(netEdge * 100).toFixed(1)}% < ${(minEdge * 100).toFixed(1)}%`; return skipResult; }
 
   const expectedReturnPct = (1 - pMarket) / pMarket;
   if (expectedReturnPct < MIN_RETURN_PCT) { skipResult.edge = grossEdge; skipResult.rawKelly = rawKelly; skipResult.reasoning = `Return ${(expectedReturnPct * 100).toFixed(1)}% < ${(MIN_RETURN_PCT * 100)}%`; return skipResult; }
 
-  betAmount = Math.min(betAmount, bankroll * MAX_BET_FRACTION);
+  betAmount = Math.min(betAmount, bankroll * maxBetFrac);
   betAmount = Math.floor(betAmount * 100) / 100;
 
   const expectedWin = betAmount * ((1 - pMarket) / pMarket);
@@ -1965,6 +1975,7 @@ Deno.serve(async (req) => {
           const kelly = calculateKellyBet(
             enrichedAnalysis, market, updatedPortfolio.balance,
             aiResult.usage.costUsd, Math.max(1, aiResult.analyses.length),
+            DEFAULT_MODEL,
           );
           if (kelly.betAmount <= 0) {
             log(`  ⏭️ SKIP — ${kelly.reasoning}`);
