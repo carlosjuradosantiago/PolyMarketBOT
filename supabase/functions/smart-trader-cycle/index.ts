@@ -71,8 +71,8 @@ const MAX_EXPIRY_MS = 120 * 60 * 60 * 1000; // 5 days
 const SCAN_INTERVAL_SECS = 86400;
 const MIN_CLAUDE_INTERVAL_MS = 20 * 60 * 60 * 1000; // 20 hours
 const BATCH_SIZE = 4;
-const MAX_BATCHES_PER_CYCLE = 2; // Reduced from 5 for Edge Function timeout
-const MAX_ANALYZED_PER_CYCLE = 8; // 2 batches × 4
+const MAX_BATCHES_PER_CYCLE = 1; // 1 batch to stay safely under 150s Edge Function timeout
+const MAX_ANALYZED_PER_CYCLE = 4; // 1 batch × 4
 const MIN_POOL_TARGET = 15;
 const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted, use Gemini as default
 
@@ -1564,9 +1564,34 @@ Deno.serve(async (req) => {
     activities.push({ timestamp: new Date().toISOString(), message: msg, entry_type: type });
   }
 
+  // ─── Detectar modo manual ────────────────────
+  let isManual = false;
+  try {
+    const body = await req.json();
+    isManual = body?.manual === true;
+  } catch { /* no body or invalid JSON — automatic mode */ }
+
+  // Si es manual: marcar analyzing=true y limpiar throttle/lock
+  if (isManual) {
+    log("🔧 Modo MANUAL activado — limpiando throttle y lock");
+    await supabase.from("bot_state").update({
+      analyzing: true,
+      last_error: null,
+      last_cycle_at: new Date().toISOString(),
+    }).eq("id", 1);
+    await supabase.from("bot_kv").upsert(
+      { key: "last_claude_call_time", value: "0", updated_at: new Date().toISOString() },
+      { onConflict: "key" },
+    );
+    await supabase.from("bot_kv").upsert(
+      { key: "cycle_lock", value: "0", updated_at: new Date().toISOString() },
+      { onConflict: "key" },
+    );
+  }
+
   try {
     log("═══════════════════════════════════════════════");
-    log("🤖 Autonomous Smart Trader Cycle (Edge Function)");
+    log(`🤖 ${isManual ? "MANUAL" : "Autonomous"} Smart Trader Cycle (Edge Function)`);
     log(`UTC: ${new Date().toISOString()}`);
 
     // ─── Validate env ────────────────────────────
@@ -1622,7 +1647,7 @@ Deno.serve(async (req) => {
 
       // ─── Fetch Markets ─────────────────────────────
       log("📡 Fetching markets from Gamma API...");
-      const allMarkets = await fetchAllMarkets(6000);
+      const allMarkets = await fetchAllMarkets(3000);
       if (allMarkets.length === 0) {
         const msg = "❌ Failed to fetch markets from Gamma API (0 results)";
         log(msg);
@@ -1924,12 +1949,16 @@ Deno.serve(async (req) => {
 
       await dbAddActivitiesBatch(activities);
 
-      // Increment cycle count
+      // Increment cycle count + update bot_state
       try {
         const { data: bs } = await supabase.from("bot_state").select("cycle_count").eq("id", 1).single();
-        if (bs) {
-          await supabase.from("bot_state").update({ cycle_count: (bs.cycle_count || 0) + 1 }).eq("id", 1);
+        const updates: Record<string, unknown> = { cycle_count: (bs?.cycle_count || 0) + 1 };
+        if (isManual) {
+          updates.analyzing = false;
+          updates.last_error = null;
+          updates.last_cycle_at = new Date().toISOString();
         }
+        await supabase.from("bot_state").update(updates).eq("id", 1);
       } catch { /* ignore */ }
 
       const elapsed = Date.now() - startTs;
@@ -1961,6 +1990,16 @@ Deno.serve(async (req) => {
     act(`❌ FATAL: ${errMsg.slice(0, 200)}`, "Error");
     await dbAddActivitiesBatch(activities);
     try { await clearCycleLock(); } catch { /* */ }
+    // Si es manual, actualizar bot_state
+    if (isManual) {
+      try {
+        await supabase.from("bot_state").update({
+          analyzing: false,
+          last_error: errMsg.slice(0, 500),
+          last_cycle_at: new Date().toISOString(),
+        }).eq("id", 1);
+      } catch { /* */ }
+    }
     return new Response(JSON.stringify({ ok: false, error: errMsg }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

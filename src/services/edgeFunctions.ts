@@ -48,7 +48,9 @@ export interface RunCycleResult extends EdgeFunctionResult {
 }
 
 export async function callRunCycle(): Promise<RunCycleResult> {
-  return callEdgeFunction("run-cycle", "POST") as Promise<RunCycleResult>;
+  // Llama smart-trader-cycle directamente con manual=true
+  // (run-cycle como intermediario no funciona bien: Edge Functions no se invocan entre sí via HTTP)
+  return callEdgeFunction("smart-trader-cycle", "POST", { manual: true }) as Promise<RunCycleResult>;
 }
 
 // ── Detener bot ──
