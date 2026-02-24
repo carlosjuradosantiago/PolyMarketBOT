@@ -70,10 +70,11 @@ const corsHeaders = {
 const MAX_EXPIRY_MS = 120 * 60 * 60 * 1000; // 5 days
 const SCAN_INTERVAL_SECS = 86400;
 const MIN_CLAUDE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours between cycles
-const BATCH_DELAY_MS = 30 * 1000; // 30 seconds between AI batch requests
+const BATCH_DELAY_MS = 10 * 1000; // 10 seconds between AI batch requests
 const BATCH_SIZE = 4;
-const MAX_BATCHES_PER_CYCLE = 2; // 2 batches (limited by 150s Edge Function timeout)
-const MAX_ANALYZED_PER_CYCLE = 8; // 2 batches × 4
+const MAX_BATCHES_PER_CYCLE = 5; // 5 batches per cycle
+const MAX_ANALYZED_PER_CYCLE = 20; // 5 batches × 4
+const SAFETY_TIMEOUT_MS = 125_000; // Stop sending batches if >125s elapsed (Edge limit=150s)
 const MIN_POOL_TARGET = 15;
 const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted, use Gemini as default
 
@@ -1773,8 +1774,16 @@ Deno.serve(async (req) => {
       // Update throttle BEFORE starting batches
       const newAnalyzedMap = new Map(analyzedMap);
 
+      const cycleStartMs = Date.now();
+
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
-        // Delay de 30s entre batches (no antes del primero)
+        // Safety timeout: no enviar más batches si nos acercamos al límite de 150s
+        const elapsedMs = Date.now() - cycleStartMs;
+        if (elapsedMs > SAFETY_TIMEOUT_MS) {
+          log(`⚠️ Safety timeout: ${Math.round(elapsedMs / 1000)}s elapsed, skipping remaining ${batches.length - batchIdx} batch(es)`);
+          break;
+        }
+        // Delay entre batches (no antes del primero)
         if (batchIdx > 0) {
           log(`⏳ Esperando ${BATCH_DELAY_MS / 1000}s antes del siguiente batch...`);
           await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
