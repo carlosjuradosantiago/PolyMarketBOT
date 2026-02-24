@@ -16,194 +16,84 @@ import {
   BalancePoint,
   BotConfig,
   Portfolio,
-  PolymarketMarket,
   AICostTracker,
   KellyResult,
+  WalletInfo,
   defaultStats,
   defaultConfig,
   defaultPortfolio,
   defaultAICostTracker,
   migrateBotConfig,
 } from "./types";
+// ── Servicios de LECTURA desde DB ──
 import {
-  savePortfolio,
-  resetPortfolio,
-  calculateStats,
-  getBalanceHistory,
-} from "./services/paperTrading";
-import { fetchAllMarkets, fetchPaperOrderPrices, PaperPriceMap, PaperOrderRef } from "./services/polymarket";
-import { WalletInfo } from "./services/wallet";
-import { clearCachedCreds } from "./services/clobAuth";
-import { runSmartCycle, setMaxExpiry, clearAnalyzedCache } from "./services/smartTrader";
-import { loadCostTracker, resetCostTracker } from "./services/claudeAI";
-import { getBankrollStatus, canTrade } from "./services/kellyStrategy";
-import { dbGetBotState, dbSetBotState, dbAddActivity, dbGetActivities, dbAddActivitiesBatch, dbLoadPortfolio, dbSetInitialBalance, dbGetLastCycleTimestamp, dbSaveBotConfig, dbLoadBotConfig } from "./services/db";
-import { loadPortfolioFromDB } from "./services/paperTrading";
-
-// One-time: clear stale CLOB credentials so fresh derive runs
-const CREDS_VERSION = "v2";
-if (localStorage.getItem("clob_creds_version") !== CREDS_VERSION) {
-  clearCachedCreds();
-  localStorage.setItem("clob_creds_version", CREDS_VERSION);
-  console.log("[App] Cleared stale CLOB credentials for re-derive");
-}
+  supabase,
+  dbLoadPortfolio,
+  dbGetBotState,
+  dbSetBotState,
+  dbGetActivities,
+  dbLoadCostTracker,
+  dbGetCycleLogs,
+  dbLoadBotConfig,
+  dbSaveBotConfig,
+  dbSetInitialBalance,
+} from "./services/db";
+// ── Edge Functions para MUTACIONES ──
+import {
+  callRunCycle,
+  callStopBot,
+  callResetBot,
+} from "./services/edgeFunctions";
+// ── Funciones puras de cálculo (sin side-effects) ──
+import { calculateStats, getBalanceHistory } from "./services/paperTrading";
+import { fetchPaperOrderPrices, PaperPriceMap, PaperOrderRef } from "./services/polymarket";
 
 type ViewMode = "dashboard" | "markets" | "orders" | "ai" | "console";
 
 function App() {
   const { t, locale } = useTranslation();
-  // Core state
+
+  // ── Estado desde DB (se refresca con polling cada 5s) ──
   const [portfolio, setPortfolio] = useState<Portfolio>(defaultPortfolio);
   const [stats, setStats] = useState<BotStats>(defaultStats);
   const [activities, setActivities] = useState<ActivityEntry[]>([]);
-  const [balanceHistory, setBalanceHistory] = prepareBalanceHistory();
+  const [balanceHistory, setBalanceHistory] = useState<BalancePoint[]>([
+    { timestamp: "Start", balance: 100, label: "Start" },
+  ]);
   const [config, setConfig] = useState<BotConfig>(defaultConfig);
+  const [aiCostTracker, setAiCostTracker] = useState<AICostTracker>({ ...defaultAICostTracker });
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
   const [paperPrices, setPaperPrices] = useState<PaperPriceMap>({});
-  
-  // UI state  — persist isRunning so bot survives page reloads
-  const [isRunning, setIsRunning] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("dashboard");
-  const [markets, setMarkets] = useState<PolymarketMarket[]>([]);
-  const [startTime, setStartTime] = useState<Date | null>(null);
 
-  // Smart AI Trading state
-  const [aiCostTracker, setAiCostTracker] = useState<AICostTracker>({ ...defaultAICostTracker });
-  const [lastKellyResults, setLastKellyResults] = useState<KellyResult[]>([]);
-  const [dynamicInterval, setDynamicInterval] = useState(600); // seconds
+  // ── Estado del bot desde bot_state ──
+  const [isRunning, setIsRunning] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [startTime, setStartTime] = useState<Date | null>(null);
+  const [, setLastError] = useState<string | null>(null);
+  const [, setLastCycleAt] = useState<string | null>(null);
+
+  // ── Estado UI (solo local) ──
+  const [viewMode, setViewMode] = useState<ViewMode>("dashboard");
+  const [showSettings, setShowSettings] = useState(false);
+  const [isManualRunning, setIsManualRunning] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+
+  // ── AI Panel data (del ultimo cycle_log) ──
+  const [lastKellyResults] = useState<KellyResult[]>([]);
   const [bankrollStatus, setBankrollStatus] = useState("");
   const [marketsEligible, setMarketsEligible] = useState(0);
   const [marketsAnalyzed, setMarketsAnalyzed] = useState(0);
-  
-  // Console/AI state
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [countdown, setCountdown] = useState(0);
+  const [dynamicInterval, setDynamicInterval] = useState(600);
   const [lastCycleCost, setLastCycleCost] = useState(0);
-  const countdownRef = useRef<number | null>(null);
-  
-  // Refs
-  const intervalRef = useRef<number | null>(null);
-  const cycleRef = useRef<number>(0);
-  const tradingCycleRef = useRef<() => Promise<void>>();
-  const dynamicIntervalRef = useRef(600);
 
-  // Initialize portfolio, wallet, and bot state from DB on mount
-  useEffect(() => {
-    // Async load from DB (source of truth — never use defaults)
-    (async () => {
-      try {
-        // Step 1: Load portfolio from DB
-        const dbPortfolio = await loadPortfolioFromDB();
-        setPortfolio(dbPortfolio);
-        updateStatsFromPortfolio(dbPortfolio);
-
-        // Step 2: Load bot config from bot_kv (ai_provider, ai_model, api_keys, etc.)
-        const savedConfig = await dbLoadBotConfig();
-        if (savedConfig) {
-          const merged = migrateBotConfig(savedConfig);
-          setConfig(merged);
-          setMaxExpiry(merged.max_expiry_hours || 72);
-          console.log("[App] ✅ Config loaded from bot_kv:", merged.ai_provider, merged.ai_model);
-        } else {
-          console.warn("[App] ⚠️ No saved config in bot_kv, using defaults:", defaultConfig.ai_provider, defaultConfig.ai_model);
-        }
-
-        // Step 3: Load AI cost tracker from DB (full history with prompt/response)
-        const fullTracker = await loadCostTracker();
-        setAiCostTracker(fullTracker);
-
-        // Step 4: Load bot state from DB
-        const botState = await dbGetBotState();
-        if (botState.isRunning) {
-          setIsRunning(true);
-          setStartTime(botState.startTime ? new Date(botState.startTime) : new Date());
-        }
-
-        // Step 5: Load recent activities from DB
-        const dbActivities = await dbGetActivities(200);
-        if (dbActivities.length > 0) {
-          setActivities(dbActivities);
-        }
-
-        console.log("[App] DB state loaded successfully");
-        // Apply config to smartTrader (fallback if no saved config)
-        if (!savedConfig) setMaxExpiry(config.max_expiry_hours || 72);
-      } catch (e) {
-        console.error("[App] DB load FAILED — keeping current state (NOT resetting):", e);
-        // CRITICAL: Do NOT call setPortfolio(defaultPortfolio) here!
-        // That would wipe the user's real data on a network hiccup.
-      }
-    })();
-
-    // Load wallet info
-    loadWalletInfo();
-
-    // Refresh wallet positions every 10 seconds for near-real-time price updates
-    const walletInterval = setInterval(loadWalletInfo, 10_000);
-
-    // Refresh paper order prices every 10 seconds for live P&L
-    const paperInterval = setInterval(loadPaperPrices, 10_000);
-
-    return () => {
-      clearInterval(walletInterval);
-      clearInterval(paperInterval);
-    };
-  }, []);
-  
-  // Load real wallet balance via secure server proxy (private key never in browser)
-  const walletLoadCount = useRef(0);
-  const loadWalletInfo = async () => {
-    try {
-      const resp = await fetch("/api/wallet");
-      if (!resp.ok) return;
-      const info = await resp.json();
-      setWalletInfo(info);
-      // Only log details on first load
-      if (walletLoadCount.current === 0 && info.isValid && info.balance) {
-        console.log(`[Wallet] Connected: ${info.address}`);
-        console.log(`[Wallet] USDC: $${info.balance.usdc.toFixed(2)}, MATIC: ${info.balance.matic.toFixed(4)}`);
-        if (info.openOrders?.positions?.length > 0) {
-          console.log(`[Wallet] Real positions: ${info.openOrders.positions.length}, value: $${info.openOrders.totalPositionValue?.toFixed(2)}, P&L: $${info.openOrders.totalPnl?.toFixed(2)}`);
-        }
-      }
-      walletLoadCount.current++;
-    } catch (e) {
-      if (walletLoadCount.current === 0) console.error("Error loading wallet:", e);
-    }
-  };
-
-  // Fetch live prices for paper orders (uses Gamma API, no auth needed)
+  // ── Refs ──
   const portfolioRef = useRef(portfolio);
   portfolioRef.current = portfolio;
-  const loadPaperPrices = useCallback(async () => {
-    const orders = portfolioRef.current.openOrders;
-    if (orders.length === 0) return;
-    const refs: PaperOrderRef[] = orders
-      .filter(o => o.marketId)
-      .map(o => ({ conditionId: o.conditionId, marketId: o.marketId }));
-    if (refs.length === 0) return;
-    try {
-      const prices = await fetchPaperOrderPrices(refs);
-      setPaperPrices(prices);
-    } catch {
-      // Silently ignore — will retry on next interval
-    }
-  }, []);
 
-  // Load paper prices once portfolio is loaded (also called by interval)
-  useEffect(() => {
-    if (portfolio.openOrders.length > 0) loadPaperPrices();
-  }, [portfolio.openOrders.length]);
+  // ═══════════════════════════════════════════════════
+  // FUNCIONES DE CÁLCULO (puras, sin side-effects)
+  // ═══════════════════════════════════════════════════
 
-  // Prepare balance history state
-  function prepareBalanceHistory(): [BalancePoint[], React.Dispatch<React.SetStateAction<BalancePoint[]>>] {
-    return useState<BalancePoint[]>([
-      { timestamp: "Start", balance: 100, label: "Start" },
-    ]);
-  }
-
-  // Update stats from portfolio
   const updateStatsFromPortfolio = useCallback((p: Portfolio) => {
     const calcStats = calculateStats(p);
     setStats(prev => ({
@@ -223,332 +113,168 @@ function App() {
       pending_value: p.openOrders.reduce((sum, o) => sum + o.potentialPayout, 0),
       invested_in_orders: p.openOrders.reduce((sum, o) => sum + o.totalCost, 0),
     }));
-    
-    // Update balance history
+
     const history = getBalanceHistory(p);
     setBalanceHistory(history);
   }, []);
 
-  // Add activity
-  const addActivity = useCallback((message: string, type: string) => {
-    const ts = new Date();
-    const timestamp = `[${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}]`;
-    
-    setActivities(prev => {
-      const entry: ActivityEntry = {
-        timestamp,
-        message,
-        entry_type: type as any,
-      };
-      return [...prev, entry].slice(-200);
-    });
-  }, []);
+  // ═══════════════════════════════════════════════════
+  // CARGA DE DATOS (solo lecturas de DB)
+  // ═══════════════════════════════════════════════════
 
-  // Main trading cycle
-  const runTradingCycle = useCallback(async () => {
-    cycleRef.current += 1;
-    const cycle = cycleRef.current;
-    
-    // Update uptime
-    if (startTime) {
-      const elapsed = new Date().getTime() - startTime.getTime();
-      const hours = Math.floor(elapsed / 3600000);
-      const minutes = Math.floor((elapsed % 3600000) / 60000);
-      const seconds = Math.floor((elapsed % 60000) / 1000);
-      setStats(prev => ({
-        ...prev,
-        uptime: `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`,
-        cycle,
-      }));
-    }
-    
+  /** Refresca todos los datos del dashboard desde la DB */
+  const refreshData = useCallback(async () => {
     try {
-      // Reload portfolio from DB (Edge Function handles resolution server-side)
-      let currentPortfolio: Portfolio;
-      try {
-        currentPortfolio = await loadPortfolioFromDB();
-        setPortfolio(currentPortfolio);
-        updateStatsFromPortfolio(currentPortfolio);
-        setBankrollStatus(getBankrollStatus(currentPortfolio.balance));
-      } catch (dbErr) {
-        console.error("[Cycle] DB load failed — using last known portfolio (NOT resetting):", dbErr);
-        addActivity("⚠️ DB load failed — using cached portfolio, skipping cycle", "Warning");
-        setIsAnalyzing(false);
-        dynamicIntervalRef.current = 120;
-        setCountdown(120);
-        setDynamicInterval(120);
-        return;
+      // Cargar portfolio + órdenes desde DB
+      const p = await dbLoadPortfolio();
+      setPortfolio(p);
+      updateStatsFromPortfolio(p);
+
+      // Cargar estado del bot
+      const botState = await dbGetBotState();
+      setIsRunning(botState.isRunning);
+      setIsAnalyzing(botState.analyzing);
+      setLastError(botState.lastError);
+      setLastCycleAt(botState.lastCycleAt);
+      setDynamicInterval(botState.dynamicInterval);
+      if (botState.startTime) setStartTime(new Date(botState.startTime));
+      setStats(prev => ({ ...prev, cycle: botState.cycleCount }));
+
+      // Bankroll status
+      const bal = p.balance;
+      if (bal < 1) setBankrollStatus("💀 Sin fondos");
+      else if (bal < 10) setBankrollStatus("⚠️ Bankroll crítico");
+      else if (bal < 50) setBankrollStatus("🔸 Bankroll bajo");
+      else setBankrollStatus("✅ Bankroll saludable");
+
+      // Cargar actividades
+      const acts = await dbGetActivities(200);
+      setActivities(acts);
+
+      // Cargar costos IA
+      const costs = await dbLoadCostTracker();
+      setAiCostTracker(costs);
+
+      // Cargar último cycle_log para el panel AI
+      const cycleLogs = await dbGetCycleLogs(1);
+      if (cycleLogs.length > 0) {
+        const last = cycleLogs[0];
+        setMarketsAnalyzed(last.recommendations || 0);
+        setMarketsEligible(last.totalMarkets || 0);
+        setLastCycleCost(last.costUsd || 0);
+        setStats(prev => ({
+          ...prev,
+          markets_scanned: last.totalMarkets || prev.markets_scanned,
+          signals_generated: last.recommendations || prev.signals_generated,
+        }));
       }
-
-      // If balance too low to trade, skip market scanning and AI entirely
-      if (!canTrade(currentPortfolio.balance)) {
-        const status = getBankrollStatus(currentPortfolio.balance);
-        const hasOpen = currentPortfolio.openOrders.length;
-        addActivity(
-          hasOpen > 0
-            ? t("app.sleepWithOrders", status, String(hasOpen))
-            : t("app.sleepNoOrders", status),
-          "Warning"
-        );
-        setIsAnalyzing(false);
-        const waitSecs = hasOpen > 0 ? 120 : 300;
-        dynamicIntervalRef.current = waitSecs; // Update ref DIRECTLY (sync)
-        setCountdown(waitSecs);
-        setDynamicInterval(waitSecs);
-        return;
-      }
-
-      // Fetch fresh market data (only if we have balance to trade)
-      addActivity(t("app.scanning"), "Info");
-      const freshMarkets = await fetchAllMarkets(true, 12000, (loaded: number) => {
-        // Update UI as pages load
-        setMarkets(prev => prev.length < loaded ? Array(loaded).fill(null) as any : prev);
-      });
-      setMarkets(freshMarkets);
-      setStats(prev => ({ ...prev, markets_scanned: prev.markets_scanned + freshMarkets.length }));
-      addActivity(t("app.marketsFound", String(freshMarkets.length)), "Info");
-
-      // ── Guard: don't run cycle with 0 markets (API issue) ──
-      if (freshMarkets.length === 0) {
-        addActivity("⚠️ API returned 0 markets — retrying in 60s", "Warning");
-        setIsAnalyzing(false);
-        dynamicIntervalRef.current = 60;
-        setCountdown(60);
-        setDynamicInterval(60);
-        return;
-      }
-
-      // ── OSINT Research + Kelly Trading ──
-      addActivity(t("app.startingResearch"), "Inference");
-      setIsAnalyzing(true);
-
-      const smartResult = await runSmartCycle(
-        currentPortfolio,
-        freshMarkets,
-        config.claude_model,
-        config.ai_provider,
-        config.ai_model,
-        config.ai_api_keys,
-      );
-
-      // Update portfolio if bets were placed
-      if (smartResult.betsPlaced.length > 0) {
-        setPortfolio(smartResult.portfolio);
-        updateStatsFromPortfolio(smartResult.portfolio);
-      }
-
-      // Push all activities from the cycle
-      smartResult.activities.forEach(a => {
-        setActivities(prev => [...prev, a].slice(-200));
-      });
-
-      // Persist cycle activities to DB
-      if (smartResult.activities.length > 0) {
-        dbAddActivitiesBatch(smartResult.activities)
-          .catch(e => console.error("[App] DB activities batch save failed:", e));
-      }
-
-      // Update AI tracking state
-      setIsAnalyzing(false);
-      setLastKellyResults(smartResult.betsPlaced);
-      setMarketsEligible(smartResult.marketsEligible);
-      setMarketsAnalyzed(smartResult.marketsAnalyzed);
-      // Load full tracker from DB (includes prompt/rawResponse for history)
-      loadCostTracker().then(t => setAiCostTracker(t)).catch(e => console.warn('[App] AI tracker reload failed:', e));
-      // Update ref DIRECTLY first (synchronous), then state (async render)
-      dynamicIntervalRef.current = smartResult.nextScanSeconds;
-      setDynamicInterval(smartResult.nextScanSeconds);
-      setBankrollStatus(getBankrollStatus(smartResult.portfolio.balance));
-      setLastCycleCost(smartResult.aiUsage?.costUsd || 0);
-      setCountdown(smartResult.nextScanSeconds);
-      setStats(prev => ({ ...prev, signals_generated: prev.signals_generated + smartResult.marketsAnalyzed }));
-      
     } catch (e) {
-      console.error("Trading cycle error:", e);
-      addActivity(t("app.cycleError", String(e)), "Error");
-      setIsAnalyzing(false);
+      console.error("[App] Error refrescando datos:", e);
     }
-  }, [portfolio, startTime, addActivity, updateStatsFromPortfolio]);
-
-  // Handle portfolio updates from child components
-  const handlePortfolioUpdate = useCallback((newPortfolio: Portfolio) => {
-    setPortfolio(newPortfolio);
-    savePortfolio(newPortfolio);
-    updateStatsFromPortfolio(newPortfolio);
   }, [updateStatsFromPortfolio]);
 
-  // Start bot
-  const handleStart = useCallback(() => {
-    setIsRunning(true);
-    const now = new Date();
-    setStartTime(now);
-    // Persist to DB
-    dbSetBotState({ isRunning: true, startTime: now.toISOString() })
-      .catch(e => console.error("[App] DB bot state save failed:", e));
-    addActivity(t("app.botStarted"), "Info");
-    dbAddActivity({ timestamp: new Date().toISOString(), message: t("app.botStarted"), entry_type: "Info" })
-      .catch(e => console.error("[App] DB activity save failed:", e));
-  }, [addActivity]);
-
-  // Stop bot
-  const handleStop = useCallback(() => {
-    setIsRunning(false);
-    // Persist to DB
-    dbSetBotState({ isRunning: false, startTime: null })
-      .catch(e => console.error("[App] DB bot state save failed:", e));
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    addActivity(t("app.botStopped"), "Warning");
-    dbAddActivity({ timestamp: new Date().toISOString(), message: t("app.botStopped"), entry_type: "Warning" })
-      .catch(e => console.error("[App] DB activity save failed:", e));
-  }, [addActivity]);
-
-  // Force-run a cycle manually (bypasses 6am schedule + throttle)
-  const [isManualRunning, setIsManualRunning] = useState(false);
-  const handleForceRun = useCallback(async () => {
-    if (isManualRunning || isAnalyzing) return;
-    setIsManualRunning(true);
-    addActivity("🔧 Ciclo manual forzado por usuario", "Info");
-    // Clear throttle so the cycle runs immediately
-    clearAnalyzedCache();
+  /** Carga configuración del bot desde bot_kv */
+  const loadConfig = useCallback(async () => {
     try {
-      await tradingCycleRef.current?.();
-    } finally {
-      setIsManualRunning(false);
+      const savedConfig = await dbLoadBotConfig();
+      if (savedConfig) {
+        const merged = migrateBotConfig(savedConfig);
+        setConfig(merged);
+        console.log("[App] ✅ Config cargada:", merged.ai_provider, merged.ai_model);
+      }
+    } catch (e) {
+      console.error("[App] Error cargando config:", e);
     }
-  }, [isManualRunning, isAnalyzing, addActivity]);
-
-  // Reset portfolio — with confirmation dialog
-  const handleReset = useCallback(() => {
-    const confirmMsg = locale === "es"
-      ? "⚠️ ATENCIÓN: Esto borrará TODAS las órdenes, actividades, logs de ciclos y costos IA de la base de datos.\n\nEsta acción es IRREVERSIBLE.\n\n¿Estás seguro?"
-      : "⚠️ WARNING: This will DELETE ALL orders, activities, cycle logs, and AI costs from the database.\n\nThis action is IRREVERSIBLE.\n\nAre you sure?";
-    if (!window.confirm(confirmMsg)) return;
-    const bal = config.initial_balance || 100;
-    const newPortfolio = resetPortfolio(bal);
-    setPortfolio(newPortfolio);
-    updateStatsFromPortfolio(newPortfolio);
-    setActivities([]);
-    cycleRef.current = 0;
-    resetCostTracker();
-    clearAnalyzedCache(); // Clear throttle + analyzed IDs for fresh start
-    setAiCostTracker({ ...defaultAICostTracker });
-    setLastKellyResults([]);
-    setBankrollStatus("");
-    setMarketsEligible(0);
-    setMarketsAnalyzed(0);
-    addActivity(t("app.portfolioReset", bal.toFixed(2)), "Info");
-  }, [addActivity, updateStatsFromPortfolio, config.initial_balance, locale]);
-
-  // Keep refs always pointing to latest values
-  useEffect(() => { tradingCycleRef.current = runTradingCycle; }, [runTradingCycle]);
-  // dynamicIntervalRef is now updated DIRECTLY (synchronously) in tradingCycle — no useEffect needed
-
-  // Run trading cycle effect — only depends on isRunning
-  /** Compute seconds until next 6:00 AM UTC-5 (Colombia/EST) */
-  const secondsUntilNext6am = useCallback(() => {
-    const now = new Date();
-    // Convert to UTC-5
-    const utcMs = now.getTime() + now.getTimezoneOffset() * 60_000;
-    const utc5 = new Date(utcMs - 5 * 3600_000);
-    // Next 6am in UTC-5
-    const target = new Date(utc5);
-    target.setHours(6, 0, 0, 0);
-    if (utc5.getHours() >= 6) target.setDate(target.getDate() + 1); // already past 6am → tomorrow
-    const diffMs = target.getTime() - utc5.getTime();
-    return Math.max(60, Math.ceil(diffMs / 1000)); // at least 60s
   }, []);
 
+  /** Carga wallet info desde el proxy server */
+  const walletLoadCount = useRef(0);
+  const loadWalletInfo = useCallback(async () => {
+    try {
+      const resp = await fetch("/api/wallet");
+      if (!resp.ok) return;
+      const info = await resp.json();
+      setWalletInfo(info);
+      if (walletLoadCount.current === 0 && info.isValid && info.balance) {
+        console.log(`[Wallet] Conectada: ${info.address}`);
+        console.log(`[Wallet] USDC: $${info.balance.usdc.toFixed(2)}, MATIC: ${info.balance.matic.toFixed(4)}`);
+      }
+      walletLoadCount.current++;
+    } catch {
+      // Silencioso — reintenta en el próximo intervalo
+    }
+  }, []);
+
+  /** Carga precios actuales para órdenes paper (Gamma API, solo lectura) */
+  const loadPaperPrices = useCallback(async () => {
+    const orders = portfolioRef.current.openOrders;
+    if (orders.length === 0) return;
+    const refs: PaperOrderRef[] = orders
+      .filter(o => o.marketId)
+      .map(o => ({ conditionId: o.conditionId, marketId: o.marketId }));
+    if (refs.length === 0) return;
+    try {
+      const prices = await fetchPaperOrderPrices(refs);
+      setPaperPrices(prices);
+    } catch {
+      // Silencioso
+    }
+  }, []);
+
+  // ═══════════════════════════════════════════════════
+  // EFFECTS — Inicialización + Polling
+  // ═══════════════════════════════════════════════════
+
+  // Carga inicial + polling cada 5s
+  useEffect(() => {
+    refreshData();
+    loadConfig();
+    loadWalletInfo();
+
+    // Polling: refrescar datos cada 5 segundos
+    const dataInterval = setInterval(refreshData, 5000);
+    // Wallet info cada 10s
+    const walletInterval = setInterval(loadWalletInfo, 10_000);
+    // Paper prices cada 10s
+    const paperInterval = setInterval(loadPaperPrices, 10_000);
+
+    return () => {
+      clearInterval(dataInterval);
+      clearInterval(walletInterval);
+      clearInterval(paperInterval);
+    };
+  }, [refreshData, loadConfig, loadWalletInfo, loadPaperPrices]);
+
+  // Cargar paper prices cuando hay órdenes abiertas
+  useEffect(() => {
+    if (portfolio.openOrders.length > 0) loadPaperPrices();
+  }, [portfolio.openOrders.length, loadPaperPrices]);
+
+  // Countdown hasta próximo ciclo (cron 6:00 AM Colombia = 11:00 UTC)
   useEffect(() => {
     if (!isRunning) {
-      if (intervalRef.current) { clearTimeout(intervalRef.current); intervalRef.current = null; }
+      setCountdown(0);
       return;
     }
-
-    let cancelled = false;
-
-    // Self-scheduling: run cycle, then wait until next 6am
-    const scheduleNext = (delaySecs: number) => {
-      if (cancelled) return;
-      setCountdown(delaySecs);
-      console.log(`[Cycle] Next cycle in ${delaySecs}s (${(delaySecs/3600).toFixed(1)}h)`);
-      intervalRef.current = window.setTimeout(() => {
-        if (cancelled) return;
-        setCountdown(0); // Clear countdown while cycle runs
-        tradingCycleRef.current?.().then(() => {
-          const next = secondsUntilNext6am();
-          dynamicIntervalRef.current = next;
-          setDynamicInterval(next);
-          if (!cancelled) scheduleNext(next);
-        }).catch(() => {
-          if (!cancelled) scheduleNext(600); // Retry in 10 min on error
-        });
-      }, delaySecs * 1000);
+    const updateCountdown = () => {
+      const now = new Date();
+      const utcMs = now.getTime() + now.getTimezoneOffset() * 60_000;
+      const col = new Date(utcMs - 5 * 3600_000);
+      const target = new Date(col);
+      target.setHours(6, 0, 0, 0);
+      if (col.getHours() >= 6) target.setDate(target.getDate() + 1);
+      const diffMs = target.getTime() - col.getTime();
+      setCountdown(Math.max(0, Math.ceil(diffMs / 1000)));
     };
+    updateCountdown();
+    const id = setInterval(updateCountdown, 1000);
+    return () => clearInterval(id);
+  }, [isRunning]);
 
-    // Check DB for last cycle timestamp — prevent wasteful immediate re-runs on page reload
-    const MIN_CYCLE_GAP_MS = 20 * 3600 * 1000; // 20 hours minimum between cycles
-    dbGetLastCycleTimestamp().then((lastCycleTime) => {
-      if (cancelled) return;
-      const msSinceLastCycle = lastCycleTime ? Date.now() - lastCycleTime.getTime() : Infinity;
-
-      if (msSinceLastCycle < MIN_CYCLE_GAP_MS) {
-        // Recent cycle exists — skip immediate run, schedule to next 6am
-        const next = secondsUntilNext6am();
-        const hoursAgo = (msSinceLastCycle / 3600_000).toFixed(1);
-        console.log(`[Cycle] Last AI cycle was ${hoursAgo}h ago (< 20h) — skipping immediate run, next at 6am in ${(next/3600).toFixed(1)}h`);
-        dynamicIntervalRef.current = next;
-        setDynamicInterval(next);
-        setCountdown(next);
-        scheduleNext(next);
-      } else {
-        // No recent cycle (or first ever) — run immediately
-        console.log(`[Cycle] No recent cycle (>20h) — running immediately`);
-        tradingCycleRef.current?.().then(() => {
-          const next = secondsUntilNext6am();
-          dynamicIntervalRef.current = next;
-          setDynamicInterval(next);
-          if (!cancelled) scheduleNext(next);
-        }).catch(() => {
-          if (!cancelled) scheduleNext(600);
-        });
-      }
-    }).catch(() => {
-      // DB check failed — run immediately as fallback
-      tradingCycleRef.current?.().then(() => {
-        const next = secondsUntilNext6am();
-        dynamicIntervalRef.current = next;
-        setDynamicInterval(next);
-        if (!cancelled) scheduleNext(next);
-      }).catch(() => {
-        if (!cancelled) scheduleNext(600);
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      if (intervalRef.current) { clearTimeout(intervalRef.current); intervalRef.current = null; }
-    };
-  }, [isRunning, secondsUntilNext6am]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Countdown timer
-  useEffect(() => {
-    if (isRunning && countdown > 0) {
-      countdownRef.current = window.setInterval(() => {
-        setCountdown(prev => Math.max(0, prev - 1));
-      }, 1000);
-    }
-    return () => {
-      if (countdownRef.current) clearInterval(countdownRef.current);
-    };
-  }, [isRunning, countdown > 0]);
-
-  // Live uptime ticker — updates every second while running
+  // Uptime ticker
   useEffect(() => {
     if (!isRunning || !startTime) return;
-    const id = window.setInterval(() => {
+    const id = setInterval(() => {
       const elapsed = Date.now() - startTime.getTime();
       const hours = Math.floor(elapsed / 3600000);
       const minutes = Math.floor((elapsed % 3600000) / 60000);
@@ -561,45 +287,137 @@ function App() {
     return () => clearInterval(id);
   }, [isRunning, startTime]);
 
-  // Config save handler
+  // Suscripción Realtime para bot_state (actualizaciones instantáneas de analyzing)
+  useEffect(() => {
+    const channel = supabase
+      .channel("bot_state_changes")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "bot_state", filter: "id=eq.1" },
+        (payload) => {
+          const d = payload.new as any;
+          setIsRunning(!!d.is_running);
+          setIsAnalyzing(!!d.analyzing);
+          setLastError(d.last_error || null);
+          setLastCycleAt(d.last_cycle_at || null);
+          if (d.start_time) setStartTime(new Date(d.start_time));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // ═══════════════════════════════════════════════════
+  // HANDLERS — Delegados a Edge Functions
+  // ═══════════════════════════════════════════════════
+
+  /** Iniciar bot (solo marca is_running=true en DB — cron se encarga del resto) */
+  const handleStart = useCallback(async () => {
+    const now = new Date();
+    await dbSetBotState({ isRunning: true, startTime: now.toISOString() });
+    setIsRunning(true);
+    setStartTime(now);
+  }, []);
+
+  /** Detener bot via Edge Function */
+  const handleStop = useCallback(async () => {
+    const result = await callStopBot();
+    if (result.ok) {
+      setIsRunning(false);
+      setIsAnalyzing(false);
+    }
+    await refreshData();
+  }, [refreshData]);
+
+  /** Forzar ciclo manual via Edge Function (bypass cron + throttle) */
+  const handleForceRun = useCallback(async () => {
+    if (isManualRunning || isAnalyzing) return;
+    setIsManualRunning(true);
+    setIsAnalyzing(true);
+    try {
+      const result = await callRunCycle();
+      if (result.error) {
+        console.error("[App] Error en ciclo manual:", result.error);
+      } else {
+        console.log("[App] Ciclo completado:", result);
+      }
+    } catch (e) {
+      console.error("[App] Error en ciclo manual:", e);
+    } finally {
+      setIsManualRunning(false);
+      await refreshData();
+    }
+  }, [isManualRunning, isAnalyzing, refreshData]);
+
+  /** Reset total via Edge Function */
+  const handleReset = useCallback(async () => {
+    const confirmMsg = locale === "es"
+      ? "⚠️ ATENCIÓN: Esto borrará TODAS las órdenes, actividades, logs de ciclos y costos IA.\n\nEsta acción es IRREVERSIBLE.\n\n¿Estás seguro?"
+      : "⚠️ WARNING: This will DELETE ALL orders, activities, cycle logs, and AI costs.\n\nThis action is IRREVERSIBLE.\n\nAre you sure?";
+    if (!window.confirm(confirmMsg)) return;
+
+    const bal = config.initial_balance || 1500;
+    const result = await callResetBot(bal);
+    if (result.ok) {
+      setActivities([]);
+      setAiCostTracker({ ...defaultAICostTracker });
+      setBankrollStatus("");
+      setMarketsEligible(0);
+      setMarketsAnalyzed(0);
+      setLastCycleCost(0);
+      await refreshData();
+    }
+  }, [config.initial_balance, locale, refreshData]);
+
+  /** Actualización de portfolio desde componentes hijo (MarketsPanel, OrdersPanel) */
+  const handlePortfolioUpdate = useCallback((newPortfolio: Portfolio) => {
+    setPortfolio(newPortfolio);
+    updateStatsFromPortfolio(newPortfolio);
+    // El componente ya escribió a DB — solo actualizamos el estado local
+  }, [updateStatsFromPortfolio]);
+
+  /** Agregar actividad local (para callbacks de componentes hijo) */
+  const addActivity = useCallback((message: string, type: string) => {
+    const ts = new Date();
+    const timestamp = `[${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}]`;
+    setActivities(prev => {
+      const entry: ActivityEntry = { timestamp, message, entry_type: type as any };
+      return [...prev, entry].slice(-200);
+    });
+  }, []);
+
+  /** Guardar configuración */
   const handleSaveConfig = useCallback(async (newConfig: BotConfig) => {
     const oldConfig = config;
     setConfig(newConfig);
-    setMaxExpiry(newConfig.max_expiry_hours);
 
-    // Persistir config completa en bot_kv (ai_provider, ai_model, api_keys, etc.)
     const result = await dbSaveBotConfig(newConfig);
     if (result.ok) {
-      addActivity(
-        `✅ Config guardada: ${newConfig.ai_provider}/${newConfig.ai_model}`,
-        "Info",
-      );
+      addActivity(`✅ Config guardada: ${newConfig.ai_provider}/${newConfig.ai_model}`, "Info");
       setShowSettings(false);
     } else {
-      addActivity(
-        `❌ Error guardando config: ${result.error}`,
-        "Error",
-      );
-      // Keep settings open so user sees the error
+      addActivity(`❌ Error guardando config: ${result.error}`, "Error");
       console.error("[App] Config save failed:", result.error);
     }
 
-    // If initial_balance changed, apply to DB + reset portfolio with new bankroll
+    // Si cambió el balance inicial, actualizar en DB
     if (newConfig.initial_balance !== oldConfig.initial_balance) {
-      const newBal = newConfig.initial_balance;
       try {
-        await dbSetInitialBalance(newBal);
-        const freshPortfolio = await loadPortfolioFromDB();
-        setPortfolio(freshPortfolio);
-        updateStatsFromPortfolio(freshPortfolio);
-        addActivity(t("app.balanceUpdated", newBal.toFixed(2)), "Info");
+        await dbSetInitialBalance(newConfig.initial_balance);
+        await refreshData();
+        addActivity(t("app.balanceUpdated", newConfig.initial_balance.toFixed(2)), "Info");
       } catch (e) {
-        console.error("[App] Failed to update initial balance:", e);
+        console.error("[App] Error actualizando balance inicial:", e);
       }
     }
+  }, [config, addActivity, refreshData, t]);
 
-    addActivity(t("app.configUpdated", String(newConfig.max_expiry_hours)), "Info");
-  }, [config, addActivity, updateStatsFromPortfolio]);
+  // ═══════════════════════════════════════════════════
+  // RENDER
+  // ═══════════════════════════════════════════════════
 
   return (
     <div className="w-full h-full bg-bot-bg flex flex-col overflow-hidden relative z-10">
@@ -639,7 +457,7 @@ function App() {
               {tab.label}
             </button>
           ))}
-          
+
           {/* Reset Button */}
           <div className="w-px h-5 bg-bot-border/30 mx-1" />
           <button
@@ -659,11 +477,9 @@ function App() {
       <div className="flex-1 flex gap-2.5 px-5 pb-3 min-h-0 overflow-hidden">
         {viewMode === "dashboard" && (
           <>
-            {/* Chart */}
             <div className="flex-1 min-w-0 animate-fade-in">
               <BalanceChart history={balanceHistory} />
             </div>
-            {/* Activity Log */}
             <div className="w-[420px] flex-shrink-0 animate-slide-in-right">
               <ActivityLog activities={activities} />
             </div>

@@ -1,6 +1,6 @@
 import { BotStats } from "../types";
 import { formatCurrency, formatPnl, formatPercent } from "../utils/format";
-import { WalletInfo, formatAddress } from "../services/wallet";
+import { WalletInfo, formatAddress } from "../types";
 import { useTranslation } from "../i18n";
 
 interface TopCardsProps {

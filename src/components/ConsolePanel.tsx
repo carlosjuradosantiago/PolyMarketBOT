@@ -4,8 +4,8 @@
  */
 
 import { useState, useEffect, useMemo } from "react";
-import { getCycleLogs, hydrateCycleLogs, CycleDebugLog, RecommendationResult } from "../services/smartTrader";
-import type { AICostTracker } from "../types";
+import type { AICostTracker, CycleDebugLog, RecommendationResult } from "../types";
+import { dbGetCycleLogs } from "../services/db";
 import { useTranslation } from "../i18n";
 
 type ViewMode = "all" | "day" | "month" | "year";
@@ -27,11 +27,18 @@ export default function ConsolePanel({ isAnalyzing, countdown, lastCycleCost, ai
   const { t } = useTranslation();
 
   useEffect(() => {
-    const refresh = () => setLogs([...getCycleLogs()]);
-    hydrateCycleLogs().then(refresh).catch(() => {});
-    refresh();
-    const interval = setInterval(refresh, 2000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const saved = await dbGetCycleLogs(50);
+        if (!cancelled) setLogs(saved);
+      } catch (e) {
+        console.error("[ConsolePanel] Error loading cycle logs:", e);
+      }
+    };
+    load();
+    const interval = setInterval(load, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   // Filter logs by view mode + date

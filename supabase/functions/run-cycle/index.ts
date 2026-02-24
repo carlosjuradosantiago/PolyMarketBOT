@@ -1,10 +1,11 @@
+// ═══════════════════════════════════════════════════════════════════
 // Edge Function: run-cycle
-// Ejecuta un ciclo de trading manual, actualiza bot_state.analyzing, logs, etc.
+// Ejecuta un ciclo de trading MANUAL delegando a smart-trader-cycle.
+// Actualiza bot_state.analyzing para que el dashboard lo refleje en tiempo real.
+// ═══════════════════════════════════════════════════════════════════
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// ─── Variables de entorno ─────────────
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -14,52 +15,101 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-async function setAnalyzing(val: boolean, errorMsg?: string) {
-  const update: any = { analyzing: val, last_cycle_at: new Date().toISOString() };
-  if (errorMsg) update.last_error = errorMsg.slice(0, 500);
-  await supabase.from("bot_state").update(update).eq("id", 1);
-}
-
-serve(async (req) => {
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Método no permitido" }), { status: 405 });
-  }
-  // Inicia ciclo manual
-  await setAnalyzing(true);
-  let result: any = { ok: false };
-  try {
-    // Importar la lógica principal del ciclo desde smart-trader-cycle (copiado aquí por Edge Function isolation)
-    // 1. Cargar config y estado
-    // 2. Ejecutar ciclo de trading (fetch markets, analizar, colocar órdenes, logs)
-    // 3. Guardar logs y actualizar bot_state
-
-    // --- 1. Cargar config y estado ---
-    const { data: botState } = await supabase.from("bot_state").select("*").eq("id", 1).single();
-    if (!botState) throw new Error("No se pudo cargar bot_state");
-    const { data: portfolio } = await supabase.from("portfolio").select("*").eq("id", 1).single();
-    if (!portfolio) throw new Error("No se pudo cargar portfolio");
-
-    // --- 2. Ejecutar ciclo de trading simplificado (placeholder: solo log) ---
-    // Aquí se debe reutilizar la lógica de smart-trader-cycle, pero por simplicidad inicial:
-    const now = new Date().toISOString();
-    await supabase.from("cycle_logs").insert({
-      timestamp: now,
-      summary: "Ciclo manual ejecutado desde run-cycle (implementación real pendiente de integración completa)",
-      model: "run-cycle",
-      recommendations: 0,
-      bets_placed: 0,
-      error: null,
-    });
-
-    // --- 3. Actualizar bot_state.analyzing=false, last_cycle_at ---
-    await setAnalyzing(false);
-    result = { ok: true, message: "Ciclo ejecutado correctamente" };
-  } catch (e: any) {
-    await setAnalyzing(false, e?.message || String(e));
-    result = { ok: false, error: e?.message || String(e) };
-  }
-  return new Response(JSON.stringify(result), {
-    status: result.ok ? 200 : 500,
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+Deno.serve(async (req) => {
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+  if (req.method !== "POST") {
+    return jsonResponse({ error: "Método no permitido" }, 405);
+  }
+
+  const startMs = Date.now();
+
+  // 1. Marcar analyzing = true en bot_state
+  await supabase.from("bot_state").update({
+    analyzing: true,
+    last_error: null,
+    last_cycle_at: new Date().toISOString(),
+  }).eq("id", 1);
+
+  // 2. Limpiar throttle para forzar ciclo inmediato
+  await supabase.from("bot_kv").upsert(
+    { key: "last_claude_call_time", value: "0", updated_at: new Date().toISOString() },
+    { onConflict: "key" },
+  );
+  // Limpiar cycle lock previo
+  await supabase.from("bot_kv").upsert(
+    { key: "cycle_lock", value: "0", updated_at: new Date().toISOString() },
+    { onConflict: "key" },
+  );
+
+  try {
+    // 3. Delegar a smart-trader-cycle via HTTP (reutiliza toda la lógica de 1970 líneas)
+    const cycleUrl = `${SUPABASE_URL}/functions/v1/smart-trader-cycle`;
+    const response = await fetch(cycleUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({ manual: true }),
+    });
+
+    const result = await response.json();
+    const elapsed = Date.now() - startMs;
+
+    // 4. Actualizar bot_state: analyzing=false, guardar resultado
+    await supabase.from("bot_state").update({
+      analyzing: false,
+      last_error: result.ok ? null : (result.error || result.reason || "Error desconocido").slice(0, 500),
+      last_cycle_at: new Date().toISOString(),
+    }).eq("id", 1);
+
+    // 5. Log de actividad
+    await supabase.from("activities").insert({
+      timestamp: new Date().toISOString(),
+      message: result.ok
+        ? `🔧 Ciclo manual completado: ${result.betsPlaced || 0} apuestas, ${result.recommendations || 0} recs (${(elapsed / 1000).toFixed(1)}s)`
+        : `❌ Ciclo manual falló: ${(result.error || result.reason || "Error desconocido").slice(0, 100)}`,
+      entry_type: result.ok ? "Info" : "Error",
+    });
+
+    return jsonResponse({
+      ok: result.ok ?? false,
+      betsPlaced: result.betsPlaced || 0,
+      recommendations: result.recommendations || 0,
+      poolSize: result.poolSize || 0,
+      totalMarkets: result.totalMarkets || 0,
+      costUsd: result.costUsd || 0,
+      elapsedMs: elapsed,
+      balance: result.balance || null,
+      error: result.error || result.reason || null,
+    }, result.ok ? 200 : 500);
+
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    console.error("[run-cycle] FATAL:", errMsg);
+
+    // Limpiar estado de analyzing en caso de error
+    await supabase.from("bot_state").update({
+      analyzing: false,
+      last_error: errMsg.slice(0, 500),
+    }).eq("id", 1);
+
+    await supabase.from("activities").insert({
+      timestamp: new Date().toISOString(),
+      message: `❌ run-cycle FATAL: ${errMsg.slice(0, 150)}`,
+      entry_type: "Error",
+    });
+
+    return jsonResponse({ ok: false, error: errMsg }, 500);
+  }
 });

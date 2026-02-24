@@ -27,6 +27,13 @@ export function formatNumber(value: number): string {
   return value.toFixed(0);
 }
 
+/** Formats a USD cost value with appropriate precision */
+export function formatCost(usd: number): string {
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return `${(usd * 100).toFixed(2)}¢`;
+  return `$${usd.toFixed(4)}`;
+}
+
 export function getActivityColor(type: string): string {
   switch (type) {
     case "Edge":

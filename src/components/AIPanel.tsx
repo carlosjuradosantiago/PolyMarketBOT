@@ -7,7 +7,7 @@
 
 import { useState, useCallback } from "react";
 import { AICostTracker, KellyResult, Portfolio } from "../types";
-import { formatCost } from "../services/claudeAI";
+import { formatCost } from "../utils/format";
 import { useTranslation } from "../i18n";
 
 /** Tiny copy-to-clipboard helper with visual feedback */
@@ -37,7 +37,19 @@ function CopyBtn({ text }: { text: string | null | undefined }) {
     </button>
   );
 }
-import { KELLY_CONFIG } from "../services/kellyStrategy";
+// Kelly constants — valores fijos que replica el backend
+const KELLY_CONFIG = {
+  KELLY_FRACTION: 0.50,
+  MAX_BET_FRACTION: 0.10,
+  MIN_BET_USD: 1.00,
+  MIN_EDGE_AFTER_COSTS: 0.06,
+  MIN_CONFIDENCE: 60,
+  MIN_MARKET_PRICE: 0.02,
+  MAX_MARKET_PRICE: 0.98,
+  DEFAULT_SCAN_SECS: 600,
+  MIN_SCAN_SECS: 300,
+  MAX_SCAN_SECS: 900,
+};
 import { dbGetAICostDetail } from "../services/db";
 
 interface AIPanelProps {

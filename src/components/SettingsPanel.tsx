@@ -7,7 +7,7 @@ import {
 import { BotConfig } from "../types";
 import type { AIProviderType, AIModelDef, AIProviderDef } from "../services/aiProviders";
 import { AI_PROVIDERS, getProvider, estimateCycleCost, estimateMonthlyCost } from "../services/aiProviders";
-import { testApiKey } from "../services/aiService";
+import { testApiKey } from "../services/testApiKey";
 import { useTranslation } from "../i18n";
 
 interface SettingsPanelProps {
@@ -120,7 +120,7 @@ export default function SettingsPanel({
       const mergedKeys = { ...form.ai_api_keys };
       for (const [provider, key] of Object.entries(pendingKeys)) {
         if (key && key.trim().length > 5) {
-          mergedKeys[provider] = key.trim();
+          (mergedKeys as Record<string, string>)[provider] = key.trim();
         }
       }
       const finalForm: BotConfig = {
@@ -130,7 +130,7 @@ export default function SettingsPanel({
         claude_api_key: mergedKeys.anthropic || form.claude_api_key || "",
       };
       console.log("[Settings] Saving config:", finalForm.ai_provider, finalForm.ai_model,
-        "keys:", Object.keys(mergedKeys).filter(k => mergedKeys[k]?.length > 5).join(", "));
+        "keys:", Object.keys(mergedKeys).filter(k => (mergedKeys as Record<string, string>)[k]?.length > 5).join(", "));
       await onSave(finalForm);
     } finally {
       setIsSaving(false);

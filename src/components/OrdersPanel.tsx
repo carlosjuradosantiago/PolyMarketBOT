@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Portfolio, PaperOrder } from "../types";
-import { cancelPaperOrder } from "../services/paperTrading";
+import { callCancelOrder } from "../services/edgeFunctions";
+import { dbLoadPortfolio } from "../services/db";
 import { PaperPriceMap } from "../services/polymarket";
 import { translateMarketQuestion, translateOutcome } from "../utils/translate";
 import { useTranslation } from "../i18n";
@@ -165,10 +166,16 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
     [portfolio.closedOrders]
   );
 
-  const handleCancelOrder = (order: PaperOrder) => {
-    const updatedPortfolio = cancelPaperOrder(order.id, portfolio);
-    onPortfolioUpdate(updatedPortfolio);
-    onActivity(t("orders.cancelledActivity", order.marketQuestion.slice(0, 40)), "Warning");
+  const handleCancelOrder = async (order: PaperOrder) => {
+    const result = await callCancelOrder(order.id);
+    if (result.ok) {
+      // Recargar portfolio completo desde DB después de la cancelación
+      const updated = await dbLoadPortfolio();
+      onPortfolioUpdate(updated);
+      onActivity(t("orders.cancelledActivity", order.marketQuestion.slice(0, 40)), "Warning");
+    } else {
+      onActivity(`❌ Error cancelando orden: ${result.error}`, "Error");
+    }
   };
 
   // Stats

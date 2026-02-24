@@ -411,3 +411,113 @@ export const defaultAICostTracker: AICostTracker = {
   totalCostUsd: 0,
   history: [],
 };
+
+// ─── Interfaces movidas desde smartTrader / claudeAI para eliminar dependencias circulares ───
+
+export interface SkippedMarket {
+  marketId: string;
+  question: string;
+  reason: string;
+}
+
+export interface RecommendationResult {
+  marketId: string;
+  question: string;
+  recommendedSide: string;
+  pMarket: number;
+  pReal: number;
+  edge: number;
+  confidence: number;
+  reasoning: string;
+  sources: string[];
+  kellyResult?: KellyResult;
+  decision: string;
+}
+
+export interface CycleDebugLog {
+  timestamp: string;
+  totalMarkets: number;
+  poolBreakdown: {
+    total: number;
+    noEndDate: number;
+    expired: number;
+    resolved: number;
+    tooFarOut: number;
+    junk: number;
+    sports: number;
+    crypto: number;
+    stocks: number;
+    duplicateOpen: number;
+    lowLiquidity: number;
+    wideSpread: number;
+    passed: number;
+    filterLevel: number;
+    filterLabel: string;
+  };
+  shortTermList: { question: string; endDate: string; volume: number; yesPrice: number }[];
+  prompt: string;
+  rawResponse: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  responseTimeMs: number;
+  summary: string;
+  recommendations: number;
+  skipped: SkippedMarket[];
+  results: RecommendationResult[];
+  betsPlaced: number;
+  nextScanSecs: number;
+  error?: string;
+}
+
+// ─── Wallet Types ───────────────────────────────────────────
+
+export interface WalletBalance {
+  usdc: number;
+  matic: number;
+}
+
+export interface RealOrder {
+  id: string;
+  market: string;
+  asset_id: string;
+  side: string;
+  price: number;
+  remaining: number;
+  cost: number;
+  outcome: string;
+}
+
+export interface RealPosition {
+  asset_id: string;
+  market: string;
+  marketName: string | null;
+  outcome: string;
+  shares: number;
+  avgPrice: number;
+  currentPrice: number | null;
+  totalCost: number;
+  currentValue: number | null;
+  pnl: number | null;
+}
+
+export interface WalletInfo {
+  address: string;
+  balance: WalletBalance | null;
+  polymarketBalance: number | null;
+  openOrders: {
+    count: number;
+    totalLocked: number;
+    orders: RealOrder[];
+    positions: RealPosition[];
+    totalPositionValue: number;
+    totalPnl: number;
+  } | null;
+  isValid: boolean;
+}
+
+export function formatAddress(address: string): string {
+  if (!address || address.length < 10) return address;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}

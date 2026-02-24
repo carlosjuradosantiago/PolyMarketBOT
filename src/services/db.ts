@@ -12,10 +12,10 @@ import {
   AICostTracker,
   AIUsage,
   ActivityEntry,
+  CycleDebugLog,
   defaultPortfolio,
   defaultAICostTracker,
 } from "../types";
-import { CycleDebugLog } from "./smartTrader";
 
 // ─── Supabase Client ─────────────────────────────────
 
@@ -578,6 +578,9 @@ export interface BotState {
   startTime: string | null;
   cycleCount: number;
   dynamicInterval: number;
+  analyzing: boolean;
+  lastError: string | null;
+  lastCycleAt: string | null;
 }
 
 export async function dbGetBotState(): Promise<BotState> {
@@ -593,9 +596,12 @@ export async function dbGetBotState(): Promise<BotState> {
       startTime: data.start_time,
       cycleCount: data.cycle_count,
       dynamicInterval: data.dynamic_interval,
+      analyzing: !!data.analyzing,
+      lastError: data.last_error || null,
+      lastCycleAt: data.last_cycle_at || null,
     };
   } catch {
-    return { isRunning: false, startTime: null, cycleCount: 0, dynamicInterval: 600 };
+    return { isRunning: false, startTime: null, cycleCount: 0, dynamicInterval: 600, analyzing: false, lastError: null, lastCycleAt: null };
   }
 }
 
