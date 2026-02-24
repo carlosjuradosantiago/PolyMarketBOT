@@ -69,10 +69,11 @@ const corsHeaders = {
 
 const MAX_EXPIRY_MS = 120 * 60 * 60 * 1000; // 5 days
 const SCAN_INTERVAL_SECS = 86400;
-const MIN_CLAUDE_INTERVAL_MS = 20 * 1000; // 20 seconds between AI requests
+const MIN_CLAUDE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours between cycles
+const BATCH_DELAY_MS = 30 * 1000; // 30 seconds between AI batch requests
 const BATCH_SIZE = 4;
-const MAX_BATCHES_PER_CYCLE = 1; // 1 batch to stay safely under 150s Edge Function timeout
-const MAX_ANALYZED_PER_CYCLE = 4; // 1 batch × 4
+const MAX_BATCHES_PER_CYCLE = 2; // 2 batches (limited by 150s Edge Function timeout)
+const MAX_ANALYZED_PER_CYCLE = 8; // 2 batches × 4
 const MIN_POOL_TARGET = 15;
 const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted, use Gemini as default
 
@@ -1773,6 +1774,11 @@ Deno.serve(async (req) => {
       const newAnalyzedMap = new Map(analyzedMap);
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        // Delay de 30s entre batches (no antes del primero)
+        if (batchIdx > 0) {
+          log(`⏳ Esperando ${BATCH_DELAY_MS / 1000}s antes del siguiente batch...`);
+          await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+        }
         const batch = batches[batchIdx];
         const batchLabel = `Batch ${batchIdx + 1}/${batches.length}`;
         log(`\n═══ ${batchLabel}: ${batch.length} markets ═══`);
