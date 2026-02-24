@@ -1048,6 +1048,50 @@ Never finish your response without the complete JSON output. The JSON is the ONL
 If you run out of searches, use the data you already have. ALWAYS output JSON.`;
 }
 
+// ─── Gemini-Specific OSINT Prompt (forces Google Search grounding) ────
+
+const GEMINI_SYSTEM_INSTRUCTION = `You are an expert prediction market analyst with access to Google Search.
+
+CRITICAL REQUIREMENT: You MUST use Google Search for EVERY SINGLE market you analyze. No exceptions.
+- Before forming ANY opinion about a market, you MUST search for current, real-time data first.
+- For weather markets: search official weather forecasts (NWS, Met Office, EnvCanada, etc.)
+- For politics: search polls, official statements, news
+- For entertainment: search box office data, streaming rankings, ratings
+- For finance: search market data, analyst reports, recent news
+- If your first search doesn't give enough data, search AGAIN with different terms.
+- NEVER analyze a market based only on your training data. ALWAYS ground your analysis in fresh search results.
+- You are being used as a RESEARCH TOOL. Your value is in finding REAL-TIME DATA, not in reciting training knowledge.
+- Responses that don't use Google Search are WORTHLESS to the user. The user ALREADY has training data — they need LIVE web data.
+- ALWAYS output the full JSON response. NEVER stop before outputting the JSON.`;
+
+function buildGeminiOSINTPrompt(
+  shortTermMarkets: PolymarketMarket[],
+  openOrders: PaperOrder[],
+  bankroll: number,
+  history?: { totalTrades: number; wins: number; losses: number; totalPnl: number; winRate: number },
+): string {
+  // Take the base OSINT prompt and adapt it for Gemini
+  let prompt = buildOSINTPrompt(shortTermMarkets, openOrders, bankroll, history);
+
+  // Replace Claude-specific "web_search" references with Gemini-compatible language
+  prompt = prompt.replace(
+    /Deep-analyze \d+ markets using web_search\./,
+    `Deep-analyze ${shortTermMarkets.length} markets using Google Search. You MUST search the web for EVERY market.`
+  );
+  prompt = prompt.replaceAll('using web_search', 'using Google Search');
+  prompt = prompt.replaceAll('with web_search', 'with Google Search');
+  prompt = prompt.replaceAll('web_search', 'Google Search');
+
+  // Add Gemini-specific grounding reinforcement at the top
+  const geminiHeader = `🔍 GOOGLE SEARCH GROUNDING MODE — You MUST search the internet for each market below.
+Do NOT rely on training data alone. For each market, perform at least one Google Search to find current data.
+If you analyze a market without searching first, the analysis is INVALID and will be rejected.
+The token count of your response should reflect thorough research (expect 8,000-15,000+ output tokens with search results).
+Short responses (~4,000 tokens) indicate you did NOT search — this is a FAILURE.\n\n`;
+
+  return geminiHeader + prompt;
+}
+
 // ─── Claude API Call (Direct) ────────────────────────
 
 function extractJSON(raw: string): string {
@@ -1251,7 +1295,10 @@ async function callGenericProviderAPI(
   const apiKey = getProviderApiKey(provider);
   if (!apiKey) throw new Error(`API key no configurada para ${provider}`);
 
-  let prompt = buildOSINTPrompt(batch, openOrders, bankroll, history);
+  // Use Gemini-specific prompt for Google, base prompt for others
+  let prompt = provider === "google"
+    ? buildGeminiOSINTPrompt(batch, openOrders, bankroll, history)
+    : buildOSINTPrompt(batch, openOrders, bankroll, history);
 
   // Providers without web search get a note
   const noWeb = provider === "deepseek";
@@ -1265,6 +1312,7 @@ async function callGenericProviderAPI(
   if (provider === "google") {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      system_instruction: { parts: [{ text: GEMINI_SYSTEM_INSTRUCTION }] },
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       tools: [{ google_search: {} }],
       generationConfig: { temperature: 0.3, maxOutputTokens: 16384 },
@@ -1296,8 +1344,22 @@ async function callGenericProviderAPI(
     content = parts.map((p: any) => p.text || "").join("\n");
     inputTokens = responseData.usageMetadata?.promptTokenCount || 0;
     outputTokens = responseData.usageMetadata?.candidatesTokenCount || 0;
-    searchQueries = responseData.candidates?.[0]?.groundingMetadata?.webSearchQueries || [];
+    // Extract grounding metadata (search queries + sources)
+    const grounding = responseData.candidates?.[0]?.groundingMetadata;
+    searchQueries = grounding?.webSearchQueries || [];
     webSearches = searchQueries.length;
+    // Log grounding details
+    if (webSearches > 0) {
+      log(`🌐 Gemini Google Search grounding: ${webSearches} queries`);
+      searchQueries.forEach((q: string, i: number) => log(`   🔍 Search ${i + 1}: "${q}"`));
+    } else {
+      log(`⚠️ Gemini did NOT use Google Search grounding — response may be based on training data only`);
+    }
+    // Extract grounding sources if available
+    const groundingChunks = grounding?.groundingChunks || [];
+    if (groundingChunks.length > 0) {
+      log(`   📄 ${groundingChunks.length} grounding sources cited`);
+    }
   } else {
     content = responseData.choices?.[0]?.message?.content || "";
     inputTokens = responseData.usage?.prompt_tokens || 0;
