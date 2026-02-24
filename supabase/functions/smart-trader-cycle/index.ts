@@ -79,10 +79,10 @@ const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted
 
 // Kelly
 const KELLY_FRACTION = 0.50;
-const MAX_BET_FRACTION = 0.10;
+const MAX_BET_FRACTION = 0.07;
 const MIN_BET_USD = 1.00;
-const MIN_EDGE_AFTER_COSTS = 0.06;
-const MIN_CONFIDENCE = 60;
+const MIN_EDGE_AFTER_COSTS = 0.12;
+const MIN_CONFIDENCE = 75;
 const MIN_MARKET_PRICE = 0.02;
 const MAX_MARKET_PRICE = 0.98;
 const MIN_RETURN_PCT = 0.03;
@@ -1050,17 +1050,23 @@ If you run out of searches, use the data you already have. ALWAYS output JSON.`;
 // ─── Gemini-Specific OSINT Prompt (forces Google Search grounding) ────
 
 const GEMINI_SYSTEM_INSTRUCTION = `You are an expert prediction market analyst with access to Google Search.
+You are a SKEPTICAL, CONSERVATIVE analyst. Your job is to REJECT most markets, not approve them.
 
-CRITICAL REQUIREMENT: You MUST use Google Search for EVERY SINGLE market you analyze. No exceptions.
-- Before forming ANY opinion about a market, you MUST search for current, real-time data first.
-- For weather markets: search official weather forecasts (NWS, Met Office, EnvCanada, etc.)
-- For politics: search polls, official statements, news
-- For entertainment: search box office data, streaming rankings, ratings
-- For finance: search market data, analyst reports, recent news
-- If your first search doesn't give enough data, search AGAIN with different terms.
+CRITICAL REQUIREMENTS:
+1. You MUST use Google Search for EVERY SINGLE market you analyze. No exceptions.
+2. You MUST be EXTREMELY SKEPTICAL. Most markets are efficiently priced — the market price is usually correct.
+3. Only recommend a bet when you find STRONG, CONCRETE evidence from multiple sources that the market is significantly mispriced.
+4. Your DEFAULT should be to SKIP a market. Recommending a bet is the EXCEPTION, not the rule.
+5. For a batch of 5 markets, recommending 0-2 bets is NORMAL and EXPECTED. Recommending 4-5 is almost certainly wrong.
+
+SKEPTICISM RULES:
+- If you can’t find at least 2 independent, dated sources that contradict the market price → SKIP.
+- If the market price is within 10% of your estimated probability → SKIP (the market already knows).
+- edges > 25% are almost ALWAYS wrong. Real edges in prediction markets are 5-15%.
+- Confidence above 85 requires EXTRAORDINARY evidence (official government data, verified results, etc.).
+- "I think" or "it seems likely" is NOT evidence. Only cite specific data points from your Google searches.
+- If you’re not sure, SKIP. A missed opportunity costs nothing. A bad bet costs real money.
 - NEVER analyze a market based only on your training data. ALWAYS ground your analysis in fresh search results.
-- You are being used as a RESEARCH TOOL. Your value is in finding REAL-TIME DATA, not in reciting training knowledge.
-- Responses that don't use Google Search are WORTHLESS to the user. The user ALREADY has training data — they need LIVE web data.
 - ALWAYS output the full JSON response. NEVER stop before outputting the JSON.`;
 
 function buildGeminiOSINTPrompt(
@@ -1085,8 +1091,18 @@ function buildGeminiOSINTPrompt(
   const geminiHeader = `🔍 GOOGLE SEARCH GROUNDING MODE — You MUST search the internet for each market below.
 Do NOT rely on training data alone. For each market, perform at least one Google Search to find current data.
 If you analyze a market without searching first, the analysis is INVALID and will be rejected.
-The token count of your response should reflect thorough research (expect 8,000-15,000+ output tokens with search results).
-Short responses (~4,000 tokens) indicate you did NOT search — this is a FAILURE.\n\n`;
+
+⚠️ SKEPTICISM MANDATE: You are being OVER-CONFIDENT in your recommendations.
+Most prediction markets are EFFICIENTLY PRICED. The crowd is usually right.
+Your job is to find the RARE cases where the crowd is wrong — and skip everything else.
+- For 5 markets, expect to recommend 0-2 bets MAX. If you recommend 3+, re-examine — you are likely over-confident.
+- REQUIRE: At least 2 concrete, dated sources that CONTRADICT the current market price.
+- If your pReal is within 10% of pMarket → the market is fairly priced → SKIP.
+- If edge > 25%, your pReal is almost certainly wrong. Recalibrate closer to pMarket.
+- Confidence 90+ should be RARE (maybe 1 in 20 recommendations). If you’re giving 90 to everything, you’re broken.
+- ASK YOURSELF: "What do I know from my Google searches that the thousands of traders who set this price do NOT know?" If the answer is "nothing" → SKIP.
+
+`;
 
   return geminiHeader + prompt;
 }
