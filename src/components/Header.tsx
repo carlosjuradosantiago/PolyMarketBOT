@@ -12,6 +12,7 @@ interface HeaderProps {
   onStop: () => void;
   onForceRun: () => void;
   isManualRunning: boolean;
+  isAnalyzing: boolean;
   onSettings: () => void;
 }
 
@@ -24,6 +25,7 @@ export default function Header({
   onStop,
   onForceRun,
   isManualRunning,
+  isAnalyzing,
   onSettings,
 }: HeaderProps) {
   const fmtCountdown = () => {
@@ -132,16 +134,16 @@ export default function Header({
           {/* Manual Force-Run Button */}
           <button
             onClick={onForceRun}
-            disabled={isManualRunning}
-            title={isManualRunning ? "Ejecutando..." : "Forzar ciclo manual"}
+            disabled={isManualRunning || isAnalyzing}
+            title={isManualRunning || isAnalyzing ? "Analizando..." : "Forzar ciclo manual"}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-display font-semibold border transition-all ${
-              isManualRunning
+              isManualRunning || isAnalyzing
                 ? "bg-bot-yellow/5 text-bot-yellow/50 border-bot-yellow/10 cursor-not-allowed"
                 : "bg-bot-yellow/10 text-bot-yellow border-bot-yellow/20 hover:bg-bot-yellow/20 hover:border-bot-yellow/40"
             }`}
           >
-            <RotateCw className={`w-3 h-3 ${isManualRunning ? "animate-spin" : ""}`} />
-            {isManualRunning ? "..." : "Run"}
+            <RotateCw className={`w-3 h-3 ${isManualRunning || isAnalyzing ? "animate-spin" : ""}`} />
+            {isManualRunning || isAnalyzing ? "..." : "Run"}
           </button>
 
           <button

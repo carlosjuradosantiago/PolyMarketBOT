@@ -431,6 +431,7 @@ function App() {
         onStop={handleStop}
         onForceRun={handleForceRun}
         isManualRunning={isManualRunning}
+        isAnalyzing={isAnalyzing}
         onSettings={() => setShowSettings(true)}
       />
 
