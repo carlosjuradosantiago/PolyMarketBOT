@@ -69,11 +69,13 @@ const corsHeaders = {
 
 const MAX_EXPIRY_MS = 120 * 60 * 60 * 1000; // 5 days
 const SCAN_INTERVAL_SECS = 86400;
-const MIN_CLAUDE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours between cycles
-const BATCH_DELAY_MS = 0; // No delay — 1 batch per invocation, frontend chains calls
+const MIN_CLAUDE_INTERVAL_MS = 3 * 60 * 1000; // 3 min entre auto-ciclos (cron dispara cada 5 min)
+const ANALYZED_MAP_TTL_MS = 12 * 60 * 60 * 1000; // Mercados analizados se cachean 12h
+const BATCH_DELAY_MS = 0; // No delay — 1 batch per invocation, cron/frontend chains calls
 const BATCH_SIZE = 5; // 5 markets per batch (single batch per invocation)
-const MAX_BATCHES_PER_CYCLE = 1; // 1 batch per invocation — frontend chains multiple calls
+const MAX_BATCHES_PER_CYCLE = 1; // 1 batch per invocation — cron/frontend chains multiple calls
 const MAX_ANALYZED_PER_CYCLE = 5; // 1 batch × 5 markets
+const MAX_AUTO_CYCLES_PER_DAY = 5; // Máx invocaciones automáticas por día (cron)
 const MIN_POOL_TARGET = 15;
 const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted, use Gemini as default
 
@@ -362,7 +364,7 @@ async function getThrottleState(): Promise<{ lastClaudeCallTime: number; analyze
         try {
           const entries: [string, number][] = JSON.parse(row.value);
           const now = Date.now();
-          analyzedMap = new Map(entries.filter(([, ts]) => (now - ts) < MIN_CLAUDE_INTERVAL_MS));
+          analyzedMap = new Map(entries.filter(([, ts]) => (now - ts) < ANALYZED_MAP_TTL_MS));
         } catch { /* ignore */ }
       }
     }
@@ -1763,13 +1765,37 @@ Deno.serve(async (req) => {
       // Throttle solo aplica a ciclos automáticos — manual puede correr cuando quiera
       if (!isManual && lastClaudeCallTime > 0 && timeSinceLastClaude < MIN_CLAUDE_INTERVAL_MS) {
         const secsLeft = Math.ceil((MIN_CLAUDE_INTERVAL_MS - timeSinceLastClaude) / 1000);
-        const msg = `⏳ Throttle: next analysis in ${Math.ceil(secsLeft / 60)}min (24h minimum between auto cycles)`;
+        const msg = `⏳ Throttle: próximo análisis en ${secsLeft}s (${Math.ceil(MIN_CLAUDE_INTERVAL_MS / 60000)}min mínimo entre auto-ciclos)`;
         log(msg);
         act(msg);
         await dbAddActivitiesBatch(activities);
         return new Response(JSON.stringify({ ok: true, reason: msg, secsLeft }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      }
+
+      // ─── Daily auto-cycle limit ────────────────────
+      if (!isManual) {
+        try {
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const { count } = await supabase
+            .from("cycle_logs")
+            .select("id", { count: "exact", head: true })
+            .gte("timestamp", `${todayStr}T00:00:00Z`)
+            .lte("timestamp", `${todayStr}T23:59:59.999Z`);
+          if ((count || 0) >= MAX_AUTO_CYCLES_PER_DAY) {
+            const msg = `📊 Límite diario alcanzado: ${count}/${MAX_AUTO_CYCLES_PER_DAY} ciclos auto hoy — esperando mañana`;
+            log(msg);
+            act(msg);
+            await dbAddActivitiesBatch(activities);
+            return new Response(JSON.stringify({ ok: true, reason: msg }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          log(`📊 Ciclos auto hoy: ${count || 0}/${MAX_AUTO_CYCLES_PER_DAY}`);
+        } catch (e) {
+          log("⚠️ Could not check daily cycle count:", e);
+        }
       }
 
       // ─── Load Portfolio ────────────────────────────
@@ -1867,6 +1893,16 @@ Deno.serve(async (req) => {
       if (freshPool.length > 0) {
         pool.length = 0;
         pool.push(...freshPool);
+      } else if (!isManual) {
+        // En modo auto: si ya se analizaron todos los mercados frescos, no re-analizar
+        const msg = `✅ Todos los mercados del pool ya fueron analizados hoy (${analyzedMap.size} en caché). Esperando nuevos mercados.`;
+        log(msg);
+        act(msg);
+        await dbAddActivitiesBatch(activities);
+        await resetManualAnalyzing();
+        return new Response(JSON.stringify({ ok: true, reason: msg, hasMoreMarkets: false }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       // ─── Diversify and batch ───────────────────────
