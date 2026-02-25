@@ -90,6 +90,7 @@ const es = {
   "ai.responseReceived": "📥 Respuesta recibida",
   "ai.clickToLoad": "Haz click para cargar...",
   "ai.notAvailableLegacy": "No disponible (llamada anterior a la migración)",
+  "ai.emptyResponse": "⚠️ La IA devolvió respuesta vacía (posible bloqueo de seguridad)",
   "ai.smartModeOff": "Modo Inteligente Desactivado",
   "ai.enableSmartMode": "Activa el modo \"🧠 Smart ON\" para usar Kelly Criterion + Claude AI",
   "ai.waitingFirstCycle": "Esperando primer ciclo...",

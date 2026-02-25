@@ -1333,14 +1333,51 @@ async function callGenericProviderAPI(
 
   if (provider === "google") {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+    const geminiBody = {
       system_instruction: { parts: [{ text: GEMINI_SYSTEM_INSTRUCTION }] },
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       tools: [{ google_search: {} }],
       generationConfig: { temperature: 0.3, maxOutputTokens: 16384 },
-    })});
+    };
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(geminiBody) });
     if (!res.ok) throw new Error(`Gemini API HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
     responseData = await res.json();
+
+    // ─── Detect empty/blocked Gemini responses and retry ───
+    const finishReason = responseData.candidates?.[0]?.finishReason || "UNKNOWN";
+    const hasContent = (responseData.candidates?.[0]?.content?.parts || []).some((p: any) => p.text?.trim());
+    if (!hasContent || finishReason === "SAFETY" || finishReason === "RECITATION") {
+      const blockReason = responseData.candidates?.[0]?.safetyRatings
+        ?.filter((r: any) => r.probability !== "NEGLIGIBLE" && r.probability !== "LOW")
+        ?.map((r: any) => `${r.category}:${r.probability}`)
+        ?.join(", ") || "unknown";
+      log(`⚠️ Gemini empty response — finishReason=${finishReason}, blockReason=[${blockReason}]`);
+      log(`🔄 Retrying Gemini with higher temperature and safety settings...`);
+
+      // Retry with relaxed safety settings
+      const retryBody = {
+        ...geminiBody,
+        generationConfig: { temperature: 0.5, maxOutputTokens: 16384 },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+        ],
+      };
+      const retryRes = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(retryBody) });
+      if (!retryRes.ok) throw new Error(`Gemini retry HTTP ${retryRes.status}: ${(await retryRes.text()).slice(0, 300)}`);
+      const retryData = await retryRes.json();
+      const retryFinish = retryData.candidates?.[0]?.finishReason || "UNKNOWN";
+      const retryHasContent = (retryData.candidates?.[0]?.content?.parts || []).some((p: any) => p.text?.trim());
+      if (retryHasContent) {
+        log(`✅ Gemini retry succeeded — finishReason=${retryFinish}`);
+        responseData = retryData;
+      } else {
+        log(`❌ Gemini retry also empty — finishReason=${retryFinish}`);
+        throw new Error(`Gemini devolvió respuesta vacía (finishReason=${finishReason}, retry=${retryFinish}, safety=[${blockReason}])`);
+      }
+    }
   } else {
     // OpenAI-compatible (openai, xai, deepseek)
     const urls: Record<string, string> = { openai: "https://api.openai.com/v1/chat/completions", xai: "https://api.x.ai/v1/chat/completions", deepseek: "https://api.deepseek.com/chat/completions" };

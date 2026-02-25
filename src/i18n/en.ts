@@ -92,6 +92,7 @@ const en: { [K in keyof typeof es]: string } = {
   "ai.responseReceived": "📥 Response received",
   "ai.clickToLoad": "Click to load...",
   "ai.notAvailableLegacy": "Not available (call from before migration)",
+  "ai.emptyResponse": "⚠️ AI returned empty response (possible safety block)",
   "ai.smartModeOff": "Smart Mode Disabled",
   "ai.enableSmartMode": "Enable \"🧠 Smart ON\" mode to use Kelly Criterion + Claude AI",
   "ai.waitingFirstCycle": "Waiting for first cycle...",

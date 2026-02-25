@@ -442,7 +442,7 @@ export default function AIPanel({
                               </pre>
                             ) : (
                               <span className="text-xs text-bot-muted/30 italic">
-                                {detail === undefined ? t("ai.clickToLoad") : t("ai.notAvailableLegacy")}
+                                {detail === undefined ? t("ai.clickToLoad") : (h.outputTokens === 0 ? t("ai.emptyResponse") : t("ai.notAvailableLegacy"))}
                               </span>
                             )}
                           </div>
