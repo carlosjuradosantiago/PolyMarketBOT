@@ -54,14 +54,6 @@ export async function callRunCycle(): Promise<RunCycleResult> {
   return callEdgeFunction("smart-trader-cycle", "POST", { manual: true }) as Promise<RunCycleResult>;
 }
 
-/**
- * Llamada encadenada: indica al backend que es un batch intermedio
- * y que NO debe resetear analyzing=false al terminar.
- */
-export async function callRunCycleChain(): Promise<RunCycleResult> {
-  return callEdgeFunction("smart-trader-cycle", "POST", { manual: true, chainBatch: true }) as Promise<RunCycleResult>;
-}
-
 // ── Detener bot ──
 export async function callStopBot(): Promise<EdgeFunctionResult> {
   return callEdgeFunction("stop-bot", "POST");

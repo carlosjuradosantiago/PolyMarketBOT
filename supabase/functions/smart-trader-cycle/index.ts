@@ -69,13 +69,14 @@ const corsHeaders = {
 
 const MAX_EXPIRY_MS = 120 * 60 * 60 * 1000; // 5 days
 const SCAN_INTERVAL_SECS = 86400;
-const MIN_CLAUDE_INTERVAL_MS = 3 * 60 * 1000; // 3 min entre auto-ciclos (cron dispara cada 5 min)
+const MIN_CLAUDE_INTERVAL_MS = 3 * 60 * 1000; // 3 min entre auto-ciclos (cron dispara cada 5 min, safety net)
 const ANALYZED_MAP_TTL_MS = 12 * 60 * 60 * 1000; // Mercados analizados se cachean 12h
-const BATCH_DELAY_MS = 0; // No delay — 1 batch per invocation, cron/frontend chains calls
-const BATCH_SIZE = 5; // 5 markets per batch (single batch per invocation)
-const MAX_BATCHES_PER_CYCLE = 1; // 1 batch per invocation — cron/frontend chains multiple calls
-const MAX_ANALYZED_PER_CYCLE = 5; // 1 batch × 5 markets
-const MAX_AUTO_CYCLES_PER_DAY = 5; // Máx invocaciones automáticas por día (cron)
+const BATCH_DELAY_MS = 3_000; // 3s entre batches para no saturar API de Gemini
+const BATCH_SIZE = 5; // 5 markets per batch
+const MAX_BATCHES_PER_CYCLE = 5; // Hasta 5 batches por invocación = 25 mercados máx
+const MAX_ANALYZED_PER_CYCLE = 25; // 5 batches × 5 markets = 25 mercados por ciclo
+const MAX_AUTO_CYCLES_PER_DAY = 3; // 3 invocaciones cron: 14:00, 14:05, 14:10 UTC
+const CYCLE_TIME_BUDGET_MS = 120_000; // Safety: máx 120s por invocación (Supabase free = 150s)
 const MIN_POOL_TARGET = 15;
 const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted, use Gemini as default
 
@@ -1706,13 +1707,11 @@ Deno.serve(async (req) => {
     } catch { /* ignore */ }
   }
 
-  // ─── Detectar modo manual y chain mode ────────────────────
+  // ─── Detectar modo manual ────────────────────
   let isManual = false;
-  let isChainBatch = false; // true = batch intermedio de cadena, no resetear analyzing al final
   try {
     const body = await req.json();
     isManual = body?.manual === true;
-    isChainBatch = body?.chainBatch === true; // Frontend indica que hay más batches por venir
   } catch { /* no body or invalid JSON — automatic mode */ }
 
   // Si es manual: marcar analyzing=true y limpiar throttle/lock/analyzed_map
@@ -1728,7 +1727,7 @@ Deno.serve(async (req) => {
       { key: "last_claude_call_time", value: "0", updated_at: now },
       { key: "cycle_lock", value: "0", updated_at: now },
       // Limpiar analyzed_map para que el manual analice TODOS los mercados frescos
-      ...(isChainBatch ? [] : [{ key: "analyzed_map", value: "[]", updated_at: now }]),
+      { key: "analyzed_map", value: "[]", updated_at: now },
     ], { onConflict: "key" });
   }
 
@@ -1961,8 +1960,19 @@ Deno.serve(async (req) => {
       const cycleStartMs = Date.now();
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
-        // Con 1 batch por invocación no necesitamos safety timeout ni delay
-        // El frontend encadena múltiples llamadas independientes
+        // Safety timeout: no exceder el budget de tiempo (Supabase free = 150s)
+        const elapsedSoFar = Date.now() - cycleStartMs;
+        if (batchIdx > 0 && elapsedSoFar > CYCLE_TIME_BUDGET_MS) {
+          log(`⏰ Time budget agotado (${Math.round(elapsedSoFar / 1000)}s > ${CYCLE_TIME_BUDGET_MS / 1000}s) — cortando en batch ${batchIdx}/${batches.length}`);
+          act(`⏰ Tiempo límite: procesados ${batchIdx} de ${batches.length} batches. Los restantes se analizarán en el próximo ciclo.`);
+          break;
+        }
+
+        // Delay entre batches para no saturar la API (no aplica al primer batch)
+        if (batchIdx > 0 && BATCH_DELAY_MS > 0) {
+          log(`⏳ Esperando ${BATCH_DELAY_MS / 1000}s antes del siguiente batch...`);
+          await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+        }
         const batch = batches[batchIdx];
         const batchLabel = `Batch ${batchIdx + 1}/${batches.length}`;
         log(`\n═══ ${batchLabel}: ${batch.length} markets ═══`);
@@ -1989,8 +1999,10 @@ Deno.serve(async (req) => {
           debugLog.skipped = [...debugLog.skipped, ...aiResult.skipped];
           totalRecommendations += aiResult.analyses.length;
 
-          // Mark batch markets as analyzed
+          // Mark batch markets as analyzed + persist analyzedMap after each batch
           for (const m of batch) newAnalyzedMap.set(m.id, Date.now());
+          // Guardar map después de cada batch (si falla mid-cycle, no re-analiza)
+          await saveThrottleState(Date.now(), newAnalyzedMap, isManual);
 
           // Persist AI cost
           await dbAddAICost({
@@ -2144,16 +2156,12 @@ Deno.serve(async (req) => {
       // Increment cycle count + update bot_state
       try {
         const { data: bs } = await supabase.from("bot_state").select("cycle_count").eq("id", 1).single();
-        const updates: Record<string, unknown> = { cycle_count: (bs?.cycle_count || 0) + 1 };
-        if (isManual && !isChainBatch) {
-          // Solo resetear analyzing en el último batch de la cadena (o si no es cadena)
-          updates.analyzing = false;
-          updates.last_error = null;
-          updates.last_cycle_at = new Date().toISOString();
-        } else if (isManual && isChainBatch) {
-          // Batch intermedio: mantener analyzing=true, actualizar timestamp
-          updates.last_cycle_at = new Date().toISOString();
-        }
+        const updates: Record<string, unknown> = {
+          cycle_count: (bs?.cycle_count || 0) + 1,
+          analyzing: false,
+          last_error: null,
+          last_cycle_at: new Date().toISOString(),
+        };
         await supabase.from("bot_state").update(updates).eq("id", 1);
       } catch { /* ignore */ }
 
@@ -2161,7 +2169,7 @@ Deno.serve(async (req) => {
       log("────────────────────────────────────────────────");
       log(`📋 SUMMARY: ${totalBetsThisCycle} bets / ${totalRecommendations} recs / ${pool.length} in pool`);
       log(`💸 Cycle cost: ${formatCost(totalAICostCycle)} | Time: ${elapsed}ms`);
-      if (hasMoreMarkets) log(`🔗 hasMoreMarkets=true — frontend can chain another call`);
+      if (hasMoreMarkets) log(`ℹ️ hasMoreMarkets=true — quedan mercados frescos para el próximo ciclo diario`);
       log("────────────────────────────────────────────────");
 
       return new Response(JSON.stringify({
