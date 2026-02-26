@@ -20,6 +20,7 @@ export interface PortfolioStats {
   totalInvested: number;
   equity: number;
   maxDrawdown: number;
+  sharpeRatio: number;
 }
 
 export function calculateStats(portfolio: Portfolio): PortfolioStats {
@@ -47,6 +48,21 @@ export function calculateStats(portfolio: Portfolio): PortfolioStats {
     if (dd > maxDD) maxDD = dd;
   }
 
+  // Sharpe Ratio (annualized, assuming ~365 trading days for prediction markets)
+  let sharpeRatio = 0;
+  if (pnls.length >= 2) {
+    const returns = pnls.map((pnl, i) => {
+      const cost = closed[i]?.totalCost || 1;
+      return pnl / cost; // percentage return per trade
+    });
+    const mean = returns.reduce((s, r) => s + r, 0) / returns.length;
+    const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / (returns.length - 1);
+    const stdDev = Math.sqrt(variance);
+    if (stdDev > 0) {
+      sharpeRatio = (mean / stdDev) * Math.sqrt(365);
+    }
+  }
+
   return {
     totalTrades: closed.length,
     wins,
@@ -61,6 +77,7 @@ export function calculateStats(portfolio: Portfolio): PortfolioStats {
     totalInvested,
     equity: portfolio.balance + totalInvested,
     maxDrawdown: maxDD,
+    sharpeRatio,
   };
 }
 

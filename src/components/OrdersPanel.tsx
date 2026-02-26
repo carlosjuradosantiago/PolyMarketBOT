@@ -137,7 +137,9 @@ function getTimeProgress(createdAt: string, endDate?: string): number {
 
 export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, paperPrices }: OrdersPanelProps) {
   const [activeTab, setActiveTab] = useState<OrderTab>("active");
+  const [page, setPage] = useState<Record<OrderTab, number>>({ active: 1, won: 1, lost: 1, cancelled: 1 });
   const { t } = useTranslation();
+  const ORDERS_PER_PAGE = 10;
 
   // Live tick every 1s so countdowns update in real-time with seconds
   const [, setTick] = useState(0);
@@ -289,7 +291,7 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => { setActiveTab(tab.id); setPage(prev => ({ ...prev, [tab.id]: 1 })); }}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all
               ${activeTab === tab.id
                 ? `${tab.activeColor} text-white shadow-lg`
@@ -314,11 +316,20 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
           {openOrders.length === 0 ? (
             <EmptyState icon="📭" title={t("orders.emptyActive")} subtitle={t("orders.emptyActiveHint")} />
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              {openOrders.map(order => (
-                <ActiveOrderCard key={order.id} order={order} onCancel={handleCancelOrder} paperPrices={paperPrices} />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                {openOrders
+                  .slice((page.active - 1) * ORDERS_PER_PAGE, page.active * ORDERS_PER_PAGE)
+                  .map(order => (
+                    <ActiveOrderCard key={order.id} order={order} onCancel={handleCancelOrder} paperPrices={paperPrices} />
+                  ))}
+              </div>
+              <PaginationBar
+                current={page.active}
+                total={Math.ceil(openOrders.length / ORDERS_PER_PAGE)}
+                onPageChange={(p) => setPage(prev => ({ ...prev, active: p }))}
+              />
+            </>
           )}
         </div>
       )}
@@ -332,10 +343,17 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
             <>
               <WonSummaryBar orders={wonOrders} avgReturn={avgReturn} />
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-3">
-                {wonOrders.map(order => (
-                  <WonOrderCard key={order.id} order={order} />
-                ))}
+                {wonOrders
+                  .slice((page.won - 1) * ORDERS_PER_PAGE, page.won * ORDERS_PER_PAGE)
+                  .map(order => (
+                    <WonOrderCard key={order.id} order={order} />
+                  ))}
               </div>
+              <PaginationBar
+                current={page.won}
+                total={Math.ceil(wonOrders.length / ORDERS_PER_PAGE)}
+                onPageChange={(p) => setPage(prev => ({ ...prev, won: p }))}
+              />
             </>
           )}
         </div>
@@ -350,10 +368,17 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
             <>
               <LostSummaryBar orders={lostOrders} />
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-3">
-                {lostOrders.map(order => (
-                  <LostOrderCard key={order.id} order={order} />
-                ))}
+                {lostOrders
+                  .slice((page.lost - 1) * ORDERS_PER_PAGE, page.lost * ORDERS_PER_PAGE)
+                  .map(order => (
+                    <LostOrderCard key={order.id} order={order} />
+                  ))}
               </div>
+              <PaginationBar
+                current={page.lost}
+                total={Math.ceil(lostOrders.length / ORDERS_PER_PAGE)}
+                onPageChange={(p) => setPage(prev => ({ ...prev, lost: p }))}
+              />
             </>
           )}
         </div>
@@ -365,11 +390,20 @@ export default function OrdersPanel({ portfolio, onPortfolioUpdate, onActivity, 
           {cancelledOrders.length === 0 ? (
             <EmptyState icon="📋" title={t("orders.emptyCancelled")} subtitle={t("orders.emptyCancelledHint")} />
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              {cancelledOrders.map(order => (
-                <CancelledOrderCard key={order.id} order={order} />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                {cancelledOrders
+                  .slice((page.cancelled - 1) * ORDERS_PER_PAGE, page.cancelled * ORDERS_PER_PAGE)
+                  .map(order => (
+                    <CancelledOrderCard key={order.id} order={order} />
+                  ))}
+              </div>
+              <PaginationBar
+                current={page.cancelled}
+                total={Math.ceil(cancelledOrders.length / ORDERS_PER_PAGE)}
+                onPageChange={(p) => setPage(prev => ({ ...prev, cancelled: p }))}
+              />
+            </>
           )}
         </div>
       )}
@@ -385,6 +419,57 @@ function EmptyState({ icon, title, subtitle }: { icon: string; title: string; su
       <div className="text-6xl mb-4">{icon}</div>
       <div className="text-lg text-bot-muted/60 font-display font-semibold">{title}</div>
       <div className="text-sm text-bot-muted/40 mt-1">{subtitle}</div>
+    </div>
+  );
+}
+
+// ─── Pagination Controls ─────────────────────────────────
+
+function PaginationBar({ current, total, onPageChange }: { current: number; total: number; onPageChange: (p: number) => void }) {
+  if (total <= 1) return null;
+  const pages = Array.from({ length: total }, (_, i) => i + 1);
+  // Show max 7 page buttons with ellipsis
+  const getVisiblePages = () => {
+    if (total <= 7) return pages;
+    if (current <= 4) return [...pages.slice(0, 5), -1, total];
+    if (current >= total - 3) return [1, -1, ...pages.slice(total - 5)];
+    return [1, -1, current - 1, current, current + 1, -2, total];
+  };
+
+  return (
+    <div className="flex items-center justify-center gap-1.5 mt-4">
+      <button
+        onClick={() => onPageChange(Math.max(1, current - 1))}
+        disabled={current === 1}
+        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-bot-muted/60 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+      >
+        ‹
+      </button>
+      {getVisiblePages().map((p, i) =>
+        p < 0 ? (
+          <span key={`ellipsis-${i}`} className="text-bot-muted/30 text-xs px-1">…</span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onPageChange(p)}
+            className={`min-w-[32px] h-8 rounded-lg text-xs font-bold transition-all ${
+              p === current
+                ? "bg-bot-cyan text-white shadow-lg"
+                : "text-bot-muted/50 hover:bg-white/5 hover:text-white"
+            }`}
+          >
+            {p}
+          </button>
+        )
+      )}
+      <button
+        onClick={() => onPageChange(Math.min(total, current + 1))}
+        disabled={current === total}
+        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-bot-muted/60 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+      >
+        ›
+      </button>
+      <span className="text-[10px] text-bot-muted/40 ml-2">{current}/{total}</span>
     </div>
   );
 }

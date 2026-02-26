@@ -109,6 +109,7 @@ function App() {
       avg_bet: calcStats.avgBet,
       best_trade: calcStats.bestTrade,
       worst_trade: calcStats.worstTrade,
+      sharpe_ratio: calcStats.sharpeRatio,
       open_orders: p.openOrders.length,
       pending_value: p.openOrders.reduce((sum, o) => sum + o.potentialPayout, 0),
       invested_in_orders: p.openOrders.reduce((sum, o) => sum + o.totalCost, 0),

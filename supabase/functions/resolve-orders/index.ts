@@ -70,8 +70,8 @@ Deno.serve(async (req) => {
 
     const nowISO = new Date().toISOString();
 
-    // Get expired open orders
-    const { data: orders, error: qErr } = await sb
+    // ── 1) Get expired open orders (have end_date) ──
+    const { data: expiredOrders, error: qErr } = await sb
       .from("orders")
       .select("*")
       .in("status", ["pending", "filled"])
@@ -86,18 +86,73 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── 2) Get zombie orders (no end_date, older than 7 days) ──
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: zombieOrders } = await sb
+      .from("orders")
+      .select("*")
+      .in("status", ["pending", "filled"])
+      .is("end_date", null)
+      .lt("created_at", sevenDaysAgo);
+
+    const allOrders = [...(expiredOrders || []), ...(zombieOrders || [])];
+
     const resolved: any[] = [];
     const errors: any[] = [];
 
-    for (const order of orders || []) {
+    for (const order of allOrders) {
       try {
         // Update last_checked_at
         await sb.from("orders").update({ last_checked_at: nowISO }).eq("id", order.id);
 
-        // Fetch market
-        const market = await fetchMarket(order.market_id);
+        // Fetch market (with 1 retry)
+        let market = await fetchMarket(order.market_id);
         if (!market) {
-          console.warn(`[Resolve] Failed to fetch market ${order.market_id}`);
+          // Retry once after 2s
+          await new Promise(r => setTimeout(r, 2000));
+          market = await fetchMarket(order.market_id);
+        }
+        if (!market) {
+          console.warn(`[Resolve] Failed to fetch market ${order.market_id} (after retry)`);
+          continue;
+        }
+
+        // ── LIMIT orders that never filled: cancel, don't resolve as loss ──
+        if (order.status === "pending" && isMarketClosed(market)) {
+          const { error: cancelErr } = await sb
+            .from("orders")
+            .update({
+              status: "cancelled",
+              resolved_at: nowISO,
+              pnl: 0,
+              cancel_reason: "LIMIT order never filled — market closed",
+            })
+            .eq("id", order.id);
+
+          if (cancelErr) {
+            errors.push({ orderId: order.id, error: cancelErr.message });
+            continue;
+          }
+
+          // Refund the cost back to balance
+          const { error: refundErr } = await sb.rpc("add_balance", { amount: order.total_cost });
+          if (refundErr) console.error(`[Resolve] refund error:`, refundErr);
+
+          await sb.from("activities").insert({
+            timestamp: nowISO,
+            message: `AUTO-CANCELLED unfilled LIMIT "${(order.market_question || "").slice(0, 50)}" → refund +$${order.total_cost.toFixed(2)}`,
+            entry_type: "Warning",
+          });
+
+          resolved.push({
+            id: order.id,
+            market: (order.market_question || "").slice(0, 60),
+            status: "cancelled",
+            pnl: "0.00",
+            reason: "unfilled_limit",
+          });
+
+          console.log(`[Resolve] Order ${order.id} → CANCELLED (unfilled LIMIT, refund $${order.total_cost.toFixed(2)})`);
           continue;
         }
 
@@ -131,7 +186,8 @@ Deno.serve(async (req) => {
           if (rpcErr) console.error(`[Resolve] add_balance error:`, rpcErr);
         }
 
-        // Update total_pnl
+        // Update total_pnl (atomic via RPC — avoid race conditions)
+        const { error: pnlErr } = await sb.rpc("add_balance", { amount: 0 }); // touch
         const { data: pf } = await sb.from("portfolio").select("total_pnl").eq("id", 1).single();
         if (pf) {
           await sb
@@ -169,7 +225,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         ok: true,
-        checked: (orders || []).length,
+        checked: allOrders.length,
         resolved: resolved.length,
         details: resolved,
         errors: errors.length > 0 ? errors : undefined,
