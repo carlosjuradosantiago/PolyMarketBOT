@@ -73,10 +73,11 @@ const MIN_CLAUDE_INTERVAL_MS = 3 * 60 * 1000; // 3 min entre auto-ciclos (cron d
 const ANALYZED_MAP_TTL_MS = 12 * 60 * 60 * 1000; // Mercados analizados se cachean 12h
 const BATCH_DELAY_MS = 3_000; // 3s entre batches para no saturar API de Gemini
 const BATCH_SIZE = 5; // 5 markets per batch
-const MAX_BATCHES_PER_CYCLE = 5; // Hasta 5 batches por invocación = 25 mercados máx
-const MAX_ANALYZED_PER_CYCLE = 25; // 5 batches × 5 markets = 25 mercados por ciclo
+const MAX_BATCHES_PER_CYCLE = 3; // 3 batches por invocación = 15 mercados máx (Gemini ~50s/batch → 3×50=150 cabe en 140s)
+const MAX_ANALYZED_PER_CYCLE = 15; // 3 batches × 5 markets = 15 mercados por ciclo
 const MAX_AUTO_CYCLES_PER_DAY = 3; // 3 invocaciones cron: 14:00, 14:05, 14:10 UTC
-const CYCLE_TIME_BUDGET_MS = 120_000; // Safety: máx 120s por invocación (Supabase free = 150s)
+const CYCLE_TIME_BUDGET_MS = 140_000; // Safety: máx 140s por invocación (Supabase free = 150s)
+const MAX_EVENT_EXPOSURE_FRACTION = 0.15; // Máx 15% del bankroll en mercados correlacionados
 const MIN_POOL_TARGET = 15;
 const DEFAULT_MODEL = "gemini-2.5-flash"; // Changed: Anthropic credits depleted, use Gemini as default
 
@@ -516,6 +517,26 @@ async function dbCreateOrder(order: PaperOrder): Promise<void> {
   // Atomically deduct balance
   const { error: rpcError } = await supabase.rpc("deduct_balance", { amount: order.totalCost });
   if (rpcError) log("⚠️ deduct_balance RPC failed:", rpcError);
+
+  // Update portfolio counters: total_invested, active_positions, balance_history
+  try {
+    const { data: pf } = await supabase.from("portfolio")
+      .select("total_invested, active_positions, balance, balance_history")
+      .eq("id", 1).single();
+    if (pf) {
+      const newBalance = pf.balance - order.totalCost; // balance post-deduct
+      let history: { t: string; b: number }[] = [];
+      try { history = JSON.parse(pf.balance_history || "[]"); } catch { history = []; }
+      history.push({ t: new Date().toISOString(), b: newBalance });
+      // Keep last 100 entries
+      if (history.length > 100) history = history.slice(-100);
+      await supabase.from("portfolio").update({
+        total_invested: (pf.total_invested || 0) + order.totalCost,
+        active_positions: (pf.active_positions || 0) + 1,
+        balance_history: JSON.stringify(history),
+      }).eq("id", 1);
+    }
+  } catch (e) { log("⚠️ portfolio counters update failed:", e); }
 }
 
 async function dbUpdateOrder(updates: { id: string; aiReasoning?: any; status?: string }): Promise<void> {
@@ -1942,6 +1963,16 @@ Deno.serve(async (req) => {
       let totalBetsThisCycle = 0;
       let totalRecommendations = 0;
       let totalAICostCycle = 0;
+      // Intra-cycle dedup: track markets already bet on THIS cycle
+      const intraCyclePlacedMarketIds = new Set<string>();
+      // Event exposure tracking: broadKey → total $ invested this cycle + pre-existing
+      const eventExposure = new Map<string, number>();
+      // Pre-load existing exposure from open orders
+      for (const o of portfolio.openOrders) {
+        if (o.status !== 'filled' && o.status !== 'pending') continue;
+        const bk = computeBroadClusterKey(o.marketQuestion);
+        if (bk) eventExposure.set(bk, (eventExposure.get(bk) || 0) + (o.totalCost || 0));
+      }
       const debugLog: any = {
         timestamp: new Date().toISOString(), totalMarkets: allMarkets.length,
         poolBreakdown: breakdown, shortTermList: pool.slice(0, 20).map(m => ({
@@ -2047,6 +2078,12 @@ Deno.serve(async (req) => {
           }
           if (!market) { log(`  ❌ ID "${analysis.marketId}" not found — SKIP`); continue; }
 
+          // Intra-cycle dedup: skip if already bet on this market in this cycle
+          if (intraCyclePlacedMarketIds.has(String(market.id))) {
+            log(`  🔁 INTRA-CYCLE DEDUP: market ${market.id} already bet this cycle — SKIP`);
+            continue;
+          }
+
           // Enrich with real prices
           const prices = market.outcomePrices.map(p => parseFloat(p));
           const yesPrice = prices[0] || 0.5;
@@ -2084,6 +2121,19 @@ Deno.serve(async (req) => {
           if (kelly.betAmount <= 0) {
             log(`  ⏭️ SKIP — ${kelly.reasoning}`);
             continue;
+          }
+
+          // Event concentration check: max exposure per correlated cluster
+          const betBroadKey = computeBroadClusterKey(market.question);
+          if (betBroadKey) {
+            const currentExposure = eventExposure.get(betBroadKey) || 0;
+            const maxExposure = updatedPortfolio.balance * MAX_EVENT_EXPOSURE_FRACTION / (1 - MAX_EVENT_EXPOSURE_FRACTION) + updatedPortfolio.balance * MAX_EVENT_EXPOSURE_FRACTION;
+            const totalBankroll = updatedPortfolio.balance + currentExposure;
+            const limit = totalBankroll * MAX_EVENT_EXPOSURE_FRACTION;
+            if (currentExposure + kelly.betAmount > limit) {
+              log(`  🚫 EVENT CONCENTRATION: cluster "${betBroadKey.slice(0, 40)}" exposure $${currentExposure.toFixed(0)}+$${kelly.betAmount.toFixed(0)} > limit $${limit.toFixed(0)} (${(MAX_EVENT_EXPOSURE_FRACTION * 100).toFixed(0)}% bankroll) — SKIP`);
+              continue;
+            }
           }
 
           // Place order
@@ -2127,6 +2177,14 @@ Deno.serve(async (req) => {
           updatedPortfolio = newPortfolio;
           totalBetsThisCycle++;
           betsPlaced.push(kelly);
+
+          // Track intra-cycle placement to prevent duplicates in subsequent batches
+          intraCyclePlacedMarketIds.add(String(market.id));
+
+          // Track event exposure
+          if (betBroadKey) {
+            eventExposure.set(betBroadKey, (eventExposure.get(betBroadKey) || 0) + kelly.betAmount);
+          }
 
           const minutesLeft = Math.max(0, Math.round(msLeft / 60000));
           act(`🎯 APUESTA: ${kelly.outcomeName} "${market.question.slice(0, 40)}..." @ ${(kelly.price * 100).toFixed(0)}¢ | $${kelly.betAmount.toFixed(2)} | Edge ${(enrichedAnalysis.edge * 100).toFixed(1)}% | ⏱️${minutesLeft}min`, "Order");

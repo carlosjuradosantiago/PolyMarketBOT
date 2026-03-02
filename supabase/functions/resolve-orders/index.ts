@@ -138,6 +138,18 @@ Deno.serve(async (req) => {
           const { error: refundErr } = await sb.rpc("add_balance", { amount: order.total_cost });
           if (refundErr) console.error(`[Resolve] refund error:`, refundErr);
 
+          // Update portfolio counters (cancelled = refund, decrement active_positions + total_invested)
+          try {
+            const { data: pf } = await sb.from("portfolio").select("active_positions, total_invested").eq("id", 1).single();
+            if (pf) {
+              await sb.from("portfolio").update({
+                active_positions: Math.max(0, (pf.active_positions || 0) - 1),
+                total_invested: Math.max(0, (pf.total_invested || 0) - order.total_cost),
+                last_updated: nowISO,
+              }).eq("id", 1);
+            }
+          } catch { /* ignore */ }
+
           await sb.from("activities").insert({
             timestamp: nowISO,
             message: `AUTO-CANCELLED unfilled LIMIT "${(order.market_question || "").slice(0, 50)}" → refund +$${order.total_cost.toFixed(2)}`,
@@ -186,14 +198,27 @@ Deno.serve(async (req) => {
           if (rpcErr) console.error(`[Resolve] add_balance error:`, rpcErr);
         }
 
-        // Update total_pnl (atomic via RPC — avoid race conditions)
-        const { error: pnlErr } = await sb.rpc("add_balance", { amount: 0 }); // touch
-        const { data: pf } = await sb.from("portfolio").select("total_pnl").eq("id", 1).single();
+        // Update total_pnl, total_won/lost, active_positions
+        const { data: pf } = await sb.from("portfolio").select("total_pnl, total_won, total_lost, active_positions, total_invested, balance, balance_history").eq("id", 1).single();
         if (pf) {
+          const newTotalWon = (pf.total_won || 0) + (isWin ? order.potential_payout - order.total_cost : 0);
+          const newTotalLost = (pf.total_lost || 0) + (isWin ? 0 : order.total_cost);
+          const newActivePositions = Math.max(0, (pf.active_positions || 0) - 1);
+          const newTotalInvested = Math.max(0, (pf.total_invested || 0) - order.total_cost);
+          const newBalance = isWin ? pf.balance + order.potential_payout : pf.balance;
+          let history: { t: string; b: number }[] = [];
+          try { history = JSON.parse(pf.balance_history || "[]"); } catch { history = []; }
+          history.push({ t: nowISO, b: newBalance });
+          if (history.length > 100) history = history.slice(-100);
           await sb
             .from("portfolio")
             .update({
               total_pnl: pf.total_pnl + pnl,
+              total_won: newTotalWon,
+              total_lost: newTotalLost,
+              active_positions: newActivePositions,
+              total_invested: newTotalInvested,
+              balance_history: JSON.stringify(history),
               last_updated: nowISO,
             })
             .eq("id", 1);
