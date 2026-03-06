@@ -75,7 +75,7 @@ const BATCH_DELAY_MS = 3_000; // 3s entre batches para no saturar API de Gemini
 const BATCH_SIZE = 5; // 5 markets per batch
 const MAX_BATCHES_PER_CYCLE = 3; // 3 batches por invocación = 15 mercados máx (Gemini ~50s/batch → 3×50=150 cabe en 140s)
 const MAX_ANALYZED_PER_CYCLE = 15; // 3 batches × 5 markets = 15 mercados por ciclo
-const MAX_AUTO_CYCLES_PER_DAY = 3; // 3 invocaciones cron: 14:00, 14:05, 14:10 UTC
+const MAX_AUTO_CYCLES_PER_DAY = 3; // 3 ciclos exitosos/día — retries horarios (15-20 UTC) corren si Gemini falla
 const CYCLE_TIME_BUDGET_MS = 140_000; // Safety: máx 140s por invocación (Supabase free = 150s)
 const MAX_EVENT_EXPOSURE_FRACTION = 0.15; // Máx 15% del bankroll en mercados correlacionados
 const MIN_POOL_TARGET = 15;
@@ -524,7 +524,7 @@ async function dbCreateOrder(order: PaperOrder): Promise<void> {
       .select("total_invested, active_positions, balance, balance_history")
       .eq("id", 1).single();
     if (pf) {
-      const newBalance = pf.balance - order.totalCost; // balance post-deduct
+      const newBalance = pf.balance; // balance already deducted by RPC — no double-subtract
       let history: { t: string; b: number }[] = [];
       try { history = JSON.parse(pf.balance_history || "[]"); } catch { history = []; }
       history.push({ t: new Date().toISOString(), b: newBalance });
@@ -1798,13 +1798,16 @@ Deno.serve(async (req) => {
       if (!isManual) {
         try {
           const todayStr = new Date().toISOString().slice(0, 10);
+          // Solo contar ciclos EXITOSOS (sin error) — así los retries horarios
+          // pueden ejecutarse cuando Gemini 503 hizo fallar la ventana principal
           const { count } = await supabase
             .from("cycle_logs")
             .select("id", { count: "exact", head: true })
             .gte("timestamp", `${todayStr}T00:00:00Z`)
-            .lte("timestamp", `${todayStr}T23:59:59.999Z`);
+            .lte("timestamp", `${todayStr}T23:59:59.999Z`)
+            .is("error", null);
           if ((count || 0) >= MAX_AUTO_CYCLES_PER_DAY) {
-            const msg = `📊 Límite diario alcanzado: ${count}/${MAX_AUTO_CYCLES_PER_DAY} ciclos auto hoy — esperando mañana`;
+            const msg = `📊 Límite diario alcanzado: ${count}/${MAX_AUTO_CYCLES_PER_DAY} ciclos exitosos hoy — esperando mañana`;
             log(msg);
             act(msg);
             await dbAddActivitiesBatch(activities);
@@ -1812,7 +1815,7 @@ Deno.serve(async (req) => {
               headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
           }
-          log(`📊 Ciclos auto hoy: ${count || 0}/${MAX_AUTO_CYCLES_PER_DAY}`);
+          log(`📊 Ciclos exitosos hoy: ${count || 0}/${MAX_AUTO_CYCLES_PER_DAY}`);
         } catch (e) {
           log("⚠️ Could not check daily cycle count:", e);
         }
