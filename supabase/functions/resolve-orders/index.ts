@@ -24,19 +24,51 @@ async function fetchMarket(marketId: number) {
   }
 }
 
-function isMarketClosed(market: any): boolean {
+function isMarketClosed(market: any, order?: any): boolean {
   if (!market) return false;
   if (market.closed === true) return true;
-  if (market.acceptingOrders === false) {
-    try {
-      const prices =
-        typeof market.outcomePrices === "string"
-          ? JSON.parse(market.outcomePrices)
-          : market.outcomePrices || [];
-      return prices.map(Number).some((p: number) => p >= 0.95);
-    } catch {
-      /* ignore */
+  // Polymarket a veces tarda en cerrar mercados oficialmente.
+  // Escalonamos la agresividad de force-close según cuánto tiempo lleva vencido:
+  //   - end_date pasó + precio >= 0.95 → cerrar inmediatamente
+  //   - end_date > 3 días + precio >= 0.85 → cerrar (resultado bastante claro)
+  //   - end_date > 7 días → cerrar sin importar precio (Polymarket abandonó el mercado)
+  try {
+    const prices =
+      typeof market.outcomePrices === "string"
+        ? JSON.parse(market.outcomePrices)
+        : market.outcomePrices || [];
+    const nums = prices.map(Number);
+    const maxPrice = Math.max(...nums);
+    const hasExtremePrice = maxPrice >= 0.95;
+    const hasHighPrice = maxPrice >= 0.85;
+
+    if (market.acceptingOrders === false && hasExtremePrice) return true;
+
+    if (order?.end_date) {
+      const endDate = new Date(order.end_date);
+      const now = new Date();
+      if (endDate >= now) return false; // Aún no ha expirado
+
+      const daysOverdue = (now.getTime() - endDate.getTime()) / (1000 * 60 * 60 * 24);
+
+      // Tier 1: expirado + precio extremo → cerrar ya
+      if (hasExtremePrice) {
+        console.log(`[Resolve] Force-close: expired ${daysOverdue.toFixed(1)}d, extreme price ${maxPrice} (end=${order.end_date})`);
+        return true;
+      }
+      // Tier 2: > 3 días vencido + precio alto → cerrar
+      if (daysOverdue > 3 && hasHighPrice) {
+        console.log(`[Resolve] Force-close: overdue ${daysOverdue.toFixed(1)}d, high price ${maxPrice} (end=${order.end_date})`);
+        return true;
+      }
+      // Tier 3: > 7 días vencido → forzar cierre (mercado abandonado)
+      if (daysOverdue > 7) {
+        console.log(`[Resolve] Force-close: STALE ${daysOverdue.toFixed(1)}d overdue, price ${maxPrice} (end=${order.end_date})`);
+        return true;
+      }
     }
+  } catch {
+    /* ignore */
   }
   return false;
 }
@@ -95,7 +127,26 @@ Deno.serve(async (req) => {
       .is("end_date", null)
       .lt("created_at", sevenDaysAgo);
 
-    const allOrders = [...(expiredOrders || []), ...(zombieOrders || [])];
+    // ── 3) Get stale filled orders (end_date > 3 days ago, still filled) ──
+    //    Polymarket a veces nunca marca closed=true. Después de 3 días,
+    //    forzamos resolución basados en el precio actual.
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: staleOrders } = await sb
+      .from("orders")
+      .select("*")
+      .eq("status", "filled")
+      .not("end_date", "is", null)
+      .lt("end_date", threeDaysAgo);
+
+    // Merge all, deduplicate by id
+    const seen = new Set<string>();
+    const allOrders: any[] = [];
+    for (const o of [...(expiredOrders || []), ...(zombieOrders || []), ...(staleOrders || [])]) {
+      if (!seen.has(o.id)) {
+        seen.add(o.id);
+        allOrders.push(o);
+      }
+    }
 
     const resolved: any[] = [];
     const errors: any[] = [];
@@ -118,7 +169,7 @@ Deno.serve(async (req) => {
         }
 
         // ── LIMIT orders that never filled: cancel, don't resolve as loss ──
-        if (order.status === "pending" && isMarketClosed(market)) {
+        if (order.status === "pending" && isMarketClosed(market, order)) {
           const { error: cancelErr } = await sb
             .from("orders")
             .update({
@@ -168,7 +219,7 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        if (!isMarketClosed(market)) continue;
+        if (!isMarketClosed(market, order)) continue;
 
         // Determine winner
         const winnerIdx = getWinnerIndex(market);
